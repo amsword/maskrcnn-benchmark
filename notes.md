@@ -150,8 +150,7 @@ larger than or equal to the original image size and is divisible by 32.
     
             return out
     ```
-    other stages. Note the first residual block to decrease the spatial resolution
-    and increase the channels.
+    Note the first residual block of higher stages (2 - 4) use stride=2 to decrease the spatial resolution. The channels is also increased
     ```python
     (layer2): Sequential(
       (0): BottleneckWithFixedBatchNorm(
@@ -336,6 +335,8 @@ larger than or equal to the original image size and is divisible by 32.
         def forward(self, x):
             return [F.max_pool2d(x, kernel_size=1, stride=2, padding=0)]
     ```
+       Note that the output of FPN will have 5 rather than 4 features because
+            of `top_blocks`.
 8. Next module is the RPNModule
     ```python
     ipdb> pp self.model.rpn
