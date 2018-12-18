@@ -1,12 +1,12 @@
 1. read the image
-    ```
+    ```python
     original = cv2.imread('/home/jianfw/data/sample_images/TaylorSwift.jpg',
             cv2.IMREAD_COLOR)
     # assume the size of original is 900x1600x3
     ```
 
 2. preprocessing the image
-    ```
+    ```python
     if cfg.INPUT.TO_BGR255: # this is True
         to_bgr_transform = T.Lambda(lambda x: x * 255)
     else:
@@ -43,7 +43,7 @@ larger than or equal to the original image size and is divisible by 32.
     image_list = to_image_list(image, self.cfg.DATALOADER.SIZE_DIVISIBILITY)
     ```
     The implementation of to_image_list(). Only the key component is listed here
-    ```
+    ```python
     def to_image_list(tensors, size_divisible=0):
         if isinstance(tensors, torch.Tensor) and size_divisible > 0:
             tensors = [tensors]
@@ -70,7 +70,7 @@ larger than or equal to the original image size and is divisible by 32.
     ```
 
 4. feed the image to the model.backbone.body.stem
-    ```
+    ```python
     (stem): StemWithFixedBatchNorm(
       (conv1): Conv2d(3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
       (bn1): FrozenBatchNorm2d()
@@ -95,7 +95,7 @@ larger than or equal to the original image size and is divisible by 32.
 5. feed the output of stem to multiple stages. Each stage increases the
    channels but decrease the spatial resolution. Each stage is named
    'layer{}'.format(i) where i belongs to [1-4].
-    ```
+    ```python
     ipdb> pp self.model.backbone.body.layer1
     Sequential(
       (0): BottleneckWithFixedBatchNorm(
@@ -152,7 +152,7 @@ larger than or equal to the original image size and is divisible by 32.
     ```
     other stages. Note the first residual block to decrease the spatial resolution
     and increase the channels.
-    ```
+    ```python
     (layer2): Sequential(
       (0): BottleneckWithFixedBatchNorm(
         (downsample): Sequential(
@@ -277,7 +277,7 @@ larger than or equal to the original image size and is divisible by 32.
     )
     ```
 6. The output of each stage (layer1, layer2, layer3, layer4) are collected together. 
-    ```
+    ```python
     class ResNet(nn.Module):
         def forward(self, x):
             outputs = []
@@ -290,7 +290,7 @@ larger than or equal to the original image size and is divisible by 32.
     ```
 
 7. The next is to feed the data to FPN
-    ```
+    ```python
     ipdb> pp self.model.backbone.fpn
     FPN(
       (fpn_inner1): Conv2d(256, 256, kernel_size=(1, 1), stride=(1, 1))
@@ -337,7 +337,7 @@ larger than or equal to the original image size and is divisible by 32.
             return [F.max_pool2d(x, kernel_size=1, stride=2, padding=0)]
     ```
 8. Next module is the RPNModule
-    ```
+    ```python
     ipdb> pp self.model.rpn
     RPNModule(
       (anchor_generator): AnchorGenerator(
