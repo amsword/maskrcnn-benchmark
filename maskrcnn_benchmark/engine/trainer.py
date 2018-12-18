@@ -4,7 +4,7 @@ import logging
 import time
 
 import torch
-from torch.distributed import deprecated as dist
+import torch.distributed as dist
 
 from maskrcnn_benchmark.utils.comm import get_world_size
 from maskrcnn_benchmark.utils.metric_logger import MetricLogger
@@ -55,6 +55,7 @@ def do_train(
     end = time.time()
     for iteration, (images, targets, _) in enumerate(data_loader, start_iter):
         data_time = time.time() - end
+        iteration = iteration + 1
         arguments["iteration"] = iteration
 
         scheduler.step()
@@ -82,7 +83,7 @@ def do_train(
         eta_seconds = meters.time.global_avg * (max_iter - iteration)
         eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
 
-        if iteration % 20 == 0 or iteration == (max_iter - 1):
+        if iteration % 20 == 0 or iteration == max_iter:
             logger.info(
                 meters.delimiter.join(
                     [
@@ -100,10 +101,11 @@ def do_train(
                     memory=torch.cuda.max_memory_allocated() / 1024.0 / 1024.0,
                 )
             )
-        if iteration % checkpoint_period == 0 and iteration > 0:
+        if iteration % checkpoint_period == 0:
             checkpointer.save("model_{:07d}".format(iteration), **arguments)
+        if iteration == max_iter:
+            checkpointer.save("model_final", **arguments)
 
-    checkpointer.save("model_{:07d}".format(iteration), **arguments)
     total_training_time = time.time() - start_training_time
     total_time_str = str(datetime.timedelta(seconds=total_training_time))
     logger.info(
