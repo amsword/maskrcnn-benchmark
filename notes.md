@@ -38,7 +38,7 @@ larger than or equal to the original image size and is divisible by 32.
         - tensors: the enlarged tensor to contain all the images. In inference,
         it is 1 image. 
         - image_sizes: it is the original image size
-    ```
+    ```python
     # SIZE_DIVISIBILITY = 32
     image_list = to_image_list(image, self.cfg.DATALOADER.SIZE_DIVISIBILITY)
     ```
