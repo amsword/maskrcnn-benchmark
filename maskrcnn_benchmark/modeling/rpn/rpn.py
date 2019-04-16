@@ -11,6 +11,7 @@ from .anchor_generator import make_anchor_generator
 from .inference import make_rpn_postprocessor
 
 
+@registry.RPN_HEADS.register("SimpleRPNHead")
 class RPNHeadConvRegressor(nn.Module):
     """
     A simple RPN Head for classification and bbox regression

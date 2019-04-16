@@ -105,6 +105,8 @@ _C.MODEL.BACKBONE.CONV_BODY = "R-50-C4"
 
 # Add StopGrad at a specified stage so the bottom layers are frozen
 _C.MODEL.BACKBONE.FREEZE_CONV_BODY_AT = 2
+# whether to use BN or not in backbone
+_C.MODEL.BACKBONE.USE_BN = False
 # GN for backbone
 _C.MODEL.BACKBONE.USE_GN = False
 
