@@ -84,7 +84,18 @@ class DatasetCatalog(object):
 
     @staticmethod
     def get(name):
-        if "coco" in name:
+        if '$' in name:
+            # we assume the name's format is voc20$train or voc20$test.
+            info = [x.strip() for x in name.split('$')]
+            args = {}
+            data, split = info[:2]
+            args['data'] = data
+            args['split'] = split
+            if len(info) == 3:
+                args['labelmap'] = info[-1]
+            return {'factory': 'MaskTSVDataset', 
+                    'args': args}
+        elif "coco" in name:
             data_dir = DatasetCatalog.DATA_DIR
             attrs = DatasetCatalog.DATASETS[name]
             args = dict(
@@ -110,7 +121,7 @@ class DatasetCatalog(object):
 
 
 class ModelCatalog(object):
-    S3_C2_DETECTRON_URL = "https://s3-us-west-2.amazonaws.com/detectron"
+    S3_C2_DETECTRON_URL = "https://dl.fbaipublicfiles.com/detectron"
     C2_IMAGENET_MODELS = {
         "MSRA/R-50": "ImageNetPretrained/MSRA/R-50.pkl",
         "MSRA/R-101": "ImageNetPretrained/MSRA/R-101.pkl",

@@ -44,6 +44,7 @@ def do_train(
     device,
     checkpoint_period,
     arguments,
+    log_step=20,
 ):
     logger = logging.getLogger("maskrcnn_benchmark.trainer")
     logger.info("Start training")
@@ -54,6 +55,8 @@ def do_train(
     start_training_time = time.time()
     end = time.time()
     for iteration, (images, targets, _) in enumerate(data_loader, start_iter):
+        if len(images.image_sizes) == 0:
+            continue
         data_time = time.time() - end
         iteration = iteration + 1
         arguments["iteration"] = iteration
@@ -61,7 +64,10 @@ def do_train(
         scheduler.step()
 
         images = images.to(device)
-        targets = [target.to(device) for target in targets]
+        if isinstance(targets, torch.Tensor):
+            targets = targets.to(device)
+        else:
+            targets = [target.to(device) for target in targets]
 
         loss_dict = model(images, targets)
 
@@ -83,7 +89,7 @@ def do_train(
         eta_seconds = meters.time.global_avg * (max_iter - iteration)
         eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
 
-        if iteration % 20 == 0 or iteration == max_iter:
+        if iteration % log_step == 0 or iteration == max_iter:
             logger.info(
                 meters.delimiter.join(
                     [
@@ -103,7 +109,7 @@ def do_train(
             )
         if iteration % checkpoint_period == 0:
             checkpointer.save("model_{:07d}".format(iteration), **arguments)
-        if iteration == max_iter:
+        if iteration >= max_iter:
             checkpointer.save("model_final", **arguments)
 
     total_training_time = time.time() - start_training_time
