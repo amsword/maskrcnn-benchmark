@@ -9,6 +9,7 @@ import torch.distributed as dist
 from maskrcnn_benchmark.utils.comm import get_world_size
 from maskrcnn_benchmark.utils.metric_logger import MetricLogger
 
+from apex import amp
 
 def reduce_loss_dict(loss_dict):
     """
@@ -22,9 +23,9 @@ def reduce_loss_dict(loss_dict):
     with torch.no_grad():
         loss_names = []
         all_losses = []
-        for k, v in loss_dict.items():
+        for k in sorted(loss_dict.keys()):
             loss_names.append(k)
-            all_losses.append(v)
+            all_losses.append(loss_dict[k])
         all_losses = torch.stack(all_losses, dim=0)
         dist.reduce(all_losses, dst=0)
         if dist.get_rank() == 0:
@@ -79,7 +80,10 @@ def do_train(
         meters.update(loss=losses_reduced, **loss_dict_reduced)
 
         optimizer.zero_grad()
-        losses.backward()
+        # Note: If mixed precision is not used, this ends up doing nothing
+        # Otherwise apply loss scaling for mixed-precision recipe
+        with amp.scale_loss(losses, optimizer) as scaled_losses:
+            scaled_losses.backward()
         optimizer.step()
 
         batch_time = time.time() - end
