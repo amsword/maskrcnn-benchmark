@@ -49,7 +49,16 @@ class RPNLossComputation(object):
         # NB: need to clamp the indices because we can have a single
         # GT in the image, and matched_idxs can be -2, which goes
         # out of bounds
-        matched_targets = target[matched_idxs.clamp(min=0)]
+        if len(target) == 0:
+            dummy_bbox = torch.zeros((len(matched_idxs), 4),
+                    dtype=torch.float32, device=matched_idxs.device)
+            from maskrcnn_benchmark.structures.bounding_box import BoxList
+            matched_targets = BoxList(dummy_bbox, target.size, target.mode)
+            assert len(target.extra_fields) == 0, \
+                        'we have no idea of how to' \
+                        'set other fields'
+        else:
+            matched_targets = target[matched_idxs.clamp(min=0)]
         matched_targets.add_field("matched_idxs", matched_idxs)
         return matched_targets
 
