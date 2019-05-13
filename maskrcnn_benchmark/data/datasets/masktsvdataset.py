@@ -16,14 +16,14 @@ class MaskTSVDataset(TSVSplitImage):
             remove_images_without_annotations=True):
         # we will not use the super class's transform, but uses transforms
         # instead
-        super(MaskTSVDataset, self).__init__(data, split, version=version, 
+        super(MaskTSVDataset, self).__init__(data, split, version=version,
                 cache_policy=cache_policy, transform=None, labelmap=labelmap)
         self.transforms = transforms
         self.use_seg = False
         dataset = TSVDataset(data)
         assert dataset.has(split, 'hw')
-        self.all_key_hw = [(key, list(map(int, hw.split(' ')))) 
-                for key, hw in dataset.iter_data(split=split, t='hw', version=version)]
+        self.all_key_hw = [(key, list(map(int, hw.split(' '))))
+                for key, hw in dataset.iter_data(split=split, t='hw')]
         self.id_to_img_map = {i: key for i, (key, _) in
             enumerate(self.all_key_hw)}
         if remove_images_without_annotations:
@@ -34,7 +34,6 @@ class MaskTSVDataset(TSVSplitImage):
                 self.all_key_hw)) if self.will_non_empty(rects, w, h) > 0]
         else:
             self.shuffle = None
-
 
     def get_keys(self):
         return [key for key, _ in self.all_key_hw]
@@ -57,7 +56,7 @@ class MaskTSVDataset(TSVSplitImage):
         if self.shuffle:
             idx = self.shuffle[idx]
         cv_im, anno, key = super(MaskTSVDataset, self).__getitem__(idx)
-        
+
         img = transforms.ToPILImage()(cv_im)
         h, w = self.all_key_hw[idx][1]
         assert img.size[0] == w and img.size[1] == h
@@ -70,12 +69,12 @@ class MaskTSVDataset(TSVSplitImage):
         boxes = [obj["rect"] for obj in anno]
         boxes = torch.as_tensor(boxes).reshape(-1, 4)  # guard against no boxes
         target = BoxList(boxes, img.size, mode="xyxy")
-        
+
         # 0 is the background
         classes = [self.label_to_idx[obj["class"]] + 1 for obj in anno]
         classes = torch.tensor(classes)
         target.add_field("labels", classes)
-        
+
         if self.use_seg:
             masks = [obj["segmentation"] for obj in anno]
             from maskrcnn_benchmark.structures.segmentation_mask import SegmentationMask
@@ -94,7 +93,7 @@ class MaskTSVDataset(TSVSplitImage):
             return len(self.shuffle)
         else:
             return super(MaskTSVDataset, self).__len__()
-        
+
     def get_img_info(self, index):
         if self.shuffle:
             index = self.shuffle[index]
