@@ -56,6 +56,14 @@ class MaskTSVDataset(TSVSplitImage):
         if self.shuffle:
             idx = self.shuffle[idx]
         cv_im, anno, key = super(MaskTSVDataset, self).__getitem__(idx)
+        # we randomly select the max_box results. in the future, we should put it
+        # in the Transform
+        max_box = 300
+        # it will occupy 10G if it is 300 for one image.
+        if len(anno) > max_box:
+            import random
+            random.shuffle(anno)
+            anno = anno[:max_box]
 
         img = transforms.ToPILImage()(cv_im)
         h, w = self.all_key_hw[idx][1]
