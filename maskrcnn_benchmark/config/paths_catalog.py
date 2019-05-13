@@ -109,14 +109,22 @@ class DatasetCatalog(object):
     @staticmethod
     def get(name):
         if '$' in name:
-            # we assume the name's format is voc20$train or voc20$test.
+            # we assume the name's format is voc20$train or voc20$test, or
+            # voc20$train$1. the last number is the label version
             info = [x.strip() for x in name.split('$')]
             args = {}
             data, split = info[:2]
             args['data'] = data
             args['split'] = split
             if len(info) == 3:
-                args['labelmap'] = info[-1]
+                try:
+                    version = int(info[2])
+                    args['version'] = version
+                except:
+                    args['labelmap'] = info[-1]
+            import logging
+            from pprint import pformat
+            logging.info('MaskTSVDataset args\n{}'.format(pformat(args)))
             return {'factory': 'MaskTSVDataset', 
                     'args': args}
         elif "coco" in name:
