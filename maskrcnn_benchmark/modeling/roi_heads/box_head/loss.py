@@ -23,7 +23,8 @@ class FastRCNNLossComputation(object):
         proposal_matcher, 
         fg_bg_sampler, 
         box_coder, 
-        cls_agnostic_bbox_reg=False
+        cls_agnostic_bbox_reg=False,
+        classification_loss_type='CE'
     ):
         """
         Arguments:
@@ -35,6 +36,23 @@ class FastRCNNLossComputation(object):
         self.fg_bg_sampler = fg_bg_sampler
         self.box_coder = box_coder
         self.cls_agnostic_bbox_reg = cls_agnostic_bbox_reg
+        self.classification_loss_type = classification_loss_type
+        if self.classification_loss_type == 'CE':
+            self._classifier_loss = F.cross_entropy
+        elif self.classification_loss_type == 'BCE':
+            from qd.qd_pytorch import BCEWithLogitsNegLoss
+            self._classifier_loss = BCEWithLogitsNegLoss()
+        else:
+            assert self.classification_loss_type.startswith('tree')
+            raise NotImplementedError('not tested')
+            _, tree_file = list(classification_loss_type.split('$'))[1]
+            from mtorch.softmaxtree_loss import SoftmaxTreeWithLoss
+            self._classifier_loss = SoftmaxTreeWithLoss(
+                tree_file,
+                ignore_label=-1, # this is dummy value since this will not happend
+                loss_weight=1,
+                valid_normalization=True,
+            ).cuda()
 
     def match_targets_to_proposals(self, proposal, target):
         match_quality_matrix = boxlist_iou(target, proposal)
@@ -152,27 +170,51 @@ class FastRCNNLossComputation(object):
             [proposal.get_field("regression_targets") for proposal in proposals], dim=0
         )
 
-        classification_loss = F.cross_entropy(class_logits, labels)
+        classification_loss = self._classifier_loss(class_logits, labels)
 
-        # get indices that correspond to the regression targets for
-        # the corresponding ground truth labels, to be used with
-        # advanced indexing
-        sampled_pos_inds_subset = torch.nonzero(labels > 0).squeeze(1)
-        labels_pos = labels[sampled_pos_inds_subset]
-        if self.cls_agnostic_bbox_reg:
-            map_inds = torch.tensor([4, 5, 6, 7], device=device)
+        if labels.dim() == 1:
+            # get indices that correspond to the regression targets for
+            # the corresponding ground truth labels, to be used with
+            # advanced indexing
+            sampled_pos_inds_subset = torch.nonzero(labels > 0).squeeze(1)
+            if sampled_pos_inds_subset.numel() == 0:
+                box_loss = torch.tensor([0.], device=device)
+            else:
+                labels_pos = labels[sampled_pos_inds_subset]
+                if self.cls_agnostic_bbox_reg:
+                    map_inds = torch.tensor([4, 5, 6, 7], device=device)
+                else:
+                    map_inds = 4 * labels_pos[:, None] + torch.tensor(
+                        [0, 1, 2, 3], device=device)
+
+                box_loss = smooth_l1_loss(
+                    box_regression[sampled_pos_inds_subset[:, None], map_inds],
+                    regression_targets[sampled_pos_inds_subset],
+                    size_average=False,
+                    beta=1,
+                )
+                box_loss = box_loss / labels.numel()
         else:
-            map_inds = 4 * labels_pos[:, None] + torch.tensor(
-                [0, 1, 2, 3], device=device)
+            assert labels.dim() == 2
+            x = torch.nonzero(labels > 0)
+            if x.numel() == 0:
+                box_loss = torch.tensor([0.], device=device)
+            else:
+                sampled_pos_inds_subset = x[:, 0]
+                labels_pos = x[:, 1]
+                if self.cls_agnostic_bbox_reg:
+                    map_inds = torch.tensor([4, 5, 6, 7], device=device)
+                else:
+                    map_inds = 4 * labels_pos[:, None] + torch.tensor(
+                        [0, 1, 2, 3], device=device)
 
-        box_loss = smooth_l1_loss(
-            box_regression[sampled_pos_inds_subset[:, None], map_inds],
-            regression_targets[sampled_pos_inds_subset],
-            size_average=False,
-            beta=1,
-        )
-        box_loss = box_loss / labels.numel()
-
+                box_loss = smooth_l1_loss(
+                    box_regression[sampled_pos_inds_subset[:, None], map_inds],
+                    regression_targets[sampled_pos_inds_subset],
+                    size_average=False,
+                    beta=1,
+                )
+                box_loss = box_loss / labels_pos.numel()
         return classification_loss, box_loss
 
 
@@ -192,11 +234,13 @@ def make_roi_box_loss_evaluator(cfg):
 
     cls_agnostic_bbox_reg = cfg.MODEL.CLS_AGNOSTIC_BBOX_REG
 
+    classification_loss_type = cfg.MODEL.ROI_BOX_HEAD.CLASSIFICATION_LOSS
     loss_evaluator = FastRCNNLossComputation(
         matcher, 
         fg_bg_sampler, 
         box_coder, 
-        cls_agnostic_bbox_reg
+        cls_agnostic_bbox_reg,
+        classification_loss_type
     )
 
     return loss_evaluator

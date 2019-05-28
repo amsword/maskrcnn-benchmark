@@ -49,10 +49,11 @@ class Checkpointer(object):
         torch.save(data, save_file)
         self.tag_last_checkpoint(save_file)
 
-    def load(self, f=None):
+    def load(self, f=None, model_only=False):
         if self.has_checkpoint():
             # override argument with existing checkpoint
             f = self.get_checkpoint_file()
+            model_only = False
         if not f:
             # no checkpoint could be found
             self.logger.info("No checkpoint found. Initializing model from scratch")
@@ -61,11 +62,25 @@ class Checkpointer(object):
         checkpoint = self._load_file(f)
         self._load_model(checkpoint)
         if "optimizer" in checkpoint and self.optimizer:
-            self.logger.info("Loading optimizer from {}".format(f))
-            self.optimizer.load_state_dict(checkpoint.pop("optimizer"))
+            if not model_only:
+                self.logger.info("Loading optimizer from {}".format(f))
+                self.optimizer.load_state_dict(checkpoint.pop("optimizer"))
+            else:
+                checkpoint.pop("optimizer")
         if "scheduler" in checkpoint and self.scheduler:
-            self.logger.info("Loading scheduler from {}".format(f))
-            self.scheduler.load_state_dict(checkpoint.pop("scheduler"))
+            if not model_only:
+                self.logger.info("Loading scheduler from {}".format(f))
+                self.scheduler.load_state_dict(checkpoint.pop("scheduler"))
+            else:
+                checkpoint.pop("scheduler")
+        if model_only:
+            # if it is continuous training, this value of model_only will be false at the
+            # very beginning
+            if len(checkpoint) == 1:
+                assert 'iteration' in checkpoint
+            else:
+                assert len(checkpoint) == 0
+            checkpoint = {}
 
         # return any further checkpoint data
         return checkpoint

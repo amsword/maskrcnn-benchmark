@@ -22,7 +22,8 @@ class PostProcessor(nn.Module):
         nms=0.5,
         detections_per_img=100,
         box_coder=None,
-        cls_agnostic_bbox_reg=False
+        cls_agnostic_bbox_reg=False,
+        classification_activate='softmax',
     ):
         """
         Arguments:
@@ -39,6 +40,13 @@ class PostProcessor(nn.Module):
             box_coder = BoxCoder(weights=(10., 10., 5., 5.))
         self.box_coder = box_coder
         self.cls_agnostic_bbox_reg = cls_agnostic_bbox_reg
+        self.classification_activate = classification_activate
+        if classification_activate == 'softmax':
+            self.logits_to_prob = lambda x: F.softmax(x, -1)
+        elif classification_activate == 'sigmoid':
+            self.logits_to_prob = torch.nn.Sigmoid()
+        else:
+            raise NotImplementedError()
 
     def forward(self, x, boxes):
         """
@@ -53,7 +61,7 @@ class PostProcessor(nn.Module):
                 the extra fields labels and scores
         """
         class_logits, box_regression = x
-        class_prob = F.softmax(class_logits, -1)
+        class_prob = self.logits_to_prob(class_logits)
 
         # TODO think about a representation of batch of boxes
         image_shapes = [box.size for box in boxes]
@@ -116,7 +124,12 @@ class PostProcessor(nn.Module):
         # Apply threshold on detection probabilities and apply NMS
         # Skip j = 0, because it's the background class
         inds_all = scores > self.score_thresh
-        for j in range(1, num_classes):
+        if self.classification_activate == 'softmax':
+            cls_start_idx = 1
+        else:
+            assert self.classification_activate == 'sigmoid'
+            cls_start_idx = 0
+        for j in range(cls_start_idx, num_classes):
             inds = inds_all[:, j].nonzero().squeeze(1)
             scores_j = scores[inds, j]
             boxes_j = boxes[inds, j * 4 : (j + 1) * 4]
@@ -156,12 +169,14 @@ def make_roi_box_post_processor(cfg):
     nms_thresh = cfg.MODEL.ROI_HEADS.NMS
     detections_per_img = cfg.MODEL.ROI_HEADS.DETECTIONS_PER_IMG
     cls_agnostic_bbox_reg = cfg.MODEL.CLS_AGNOSTIC_BBOX_REG
+    classification_activate = cfg.MODEL.ROI_BOX_HEAD.CLASSIFICATION_ACTIVATE
 
     postprocessor = PostProcessor(
         score_thresh,
         nms_thresh,
         detections_per_img,
         box_coder,
-        cls_agnostic_bbox_reg
+        cls_agnostic_bbox_reg,
+        classification_activate=classification_activate
     )
     return postprocessor

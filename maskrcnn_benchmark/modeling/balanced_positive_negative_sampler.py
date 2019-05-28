@@ -35,6 +35,13 @@ class BalancedPositiveNegativeSampler(object):
         pos_idx = []
         neg_idx = []
         for matched_idxs_per_image in matched_idxs:
+            if matched_idxs_per_image.dim() == 2:
+                # in this case, the data layer's output uses multi-hot vector
+                # to represent the labels. the size of matched_idxs_per_image
+                # is N \time C (C: number of classses). If it is ignored, all
+                # entries are -1; if it is background, all entries are 0.
+                # Otherwise, the specific entries are 1 and all the reset is 0.
+                matched_idxs_per_image = matched_idxs_per_image.sum(dim=1)
             positive = torch.nonzero(matched_idxs_per_image >= 1).squeeze(1)
             negative = torch.nonzero(matched_idxs_per_image == 0).squeeze(1)
 

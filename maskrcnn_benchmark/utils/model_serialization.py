@@ -77,4 +77,6 @@ def load_state_dict(model, loaded_state_dict):
     align_and_update_state_dicts(model_state_dict, loaded_state_dict)
 
     # use strict loading
-    model.load_state_dict(model_state_dict)
+    #model.load_state_dict(model_state_dict)
+    from qd.qd_pytorch import load_model_state_ignore_mismatch
+    load_model_state_ignore_mismatch(model, model_state_dict)

@@ -55,6 +55,7 @@ def do_train(
     model.train()
     start_training_time = time.time()
     end = time.time()
+    log_start = time.time()
     for iteration, (images, targets, _) in enumerate(data_loader, start_iter):
         if len(images.image_sizes) == 0:
             continue
@@ -73,6 +74,7 @@ def do_train(
         loss_dict = model(images, targets)
 
         losses = sum(loss for loss in loss_dict.values())
+        assert losses == losses, 'NaN encountered!'
 
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = reduce_loss_dict(loss_dict)
@@ -82,8 +84,11 @@ def do_train(
         optimizer.zero_grad()
         # Note: If mixed precision is not used, this ends up doing nothing
         # Otherwise apply loss scaling for mixed-precision recipe
-        with amp.scale_loss(losses, optimizer) as scaled_losses:
-            scaled_losses.backward()
+        if device.type == 'cpu':
+            losses.backward()
+        else:
+            with amp.scale_loss(losses, optimizer) as scaled_losses:
+                scaled_losses.backward()
         optimizer.step()
 
         batch_time = time.time() - end
@@ -94,11 +99,13 @@ def do_train(
         eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
 
         if iteration % log_step == 0 or iteration == max_iter:
+            speed = get_world_size() * log_step * len(targets) / (time.time() - log_start)
             logger.info(
                 meters.delimiter.join(
                     [
                         "eta: {eta}",
                         "iter: {iter}",
+                        'speed: {speed:.1f} images/sec',
                         "{meters}",
                         "lr: {lr:.6f}",
                         "max mem: {memory:.0f}",
@@ -106,11 +113,13 @@ def do_train(
                 ).format(
                     eta=eta_string,
                     iter=iteration,
+                    speed=speed,
                     meters=str(meters),
                     lr=optimizer.param_groups[0]["lr"],
                     memory=torch.cuda.max_memory_allocated() / 1024.0 / 1024.0,
                 )
             )
+            log_start = time.time()
         if iteration % checkpoint_period == 0:
             checkpointer.save("model_{:07d}".format(iteration), **arguments)
         if iteration >= max_iter:
