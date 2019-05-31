@@ -74,7 +74,12 @@ def do_train(
         loss_dict = model(images, targets)
 
         losses = sum(loss for loss in loss_dict.values())
-        assert losses == losses, 'NaN encountered!'
+        if losses != losses:
+            logging.info('NaN encountered!')
+            arguments['images'] = images
+            arguments['targets'] = targets
+            checkpointer.save("NaN_context", **arguments)
+            raise RuntimeError('NaN encountered!')
 
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = reduce_loss_dict(loss_dict)
