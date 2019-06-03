@@ -24,7 +24,8 @@ class FastRCNNLossComputation(object):
         fg_bg_sampler, 
         box_coder, 
         cls_agnostic_bbox_reg=False,
-        classification_loss_type='CE'
+        classification_loss_type='CE',
+        num_classes=81,
     ):
         """
         Arguments:
@@ -42,6 +43,10 @@ class FastRCNNLossComputation(object):
         elif self.classification_loss_type == 'BCE':
             from qd.qd_pytorch import BCEWithLogitsNegLoss
             self._classifier_loss = BCEWithLogitsNegLoss()
+        elif self.classification_loss_type.startswith('IBCE'):
+            param = map(float, self.classification_loss_type[4:].split('_'))
+            from qd.qd_pytorch import IBCEWithLogitsNegLoss
+            self._classifier_loss = IBCEWithLogitsNegLoss(*param)
         else:
             assert self.classification_loss_type.startswith('tree')
             raise NotImplementedError('not tested')
@@ -53,6 +58,21 @@ class FastRCNNLossComputation(object):
                 loss_weight=1,
                 valid_normalization=True,
             ).cuda()
+
+        self.num_classes = num_classes
+
+    def create_all_bkg_labels(self, num, device):
+        if self.classification_loss_type in ['CE']:
+            return torch.zeros(num,
+                dtype=torch.float32,
+                device=device)
+        elif self.classification_loss_type in ['BCE'] or \
+                self.classification_loss_type.startswith('IBCE'):
+            return torch.zeros((num, self.num_classes),
+                dtype=torch.float32,
+                device=device)
+        else:
+            raise NotImplementedError(self.classification_loss_type)
 
     def match_targets_to_proposals(self, proposal, target):
         match_quality_matrix = boxlist_iou(target, proposal)
@@ -68,9 +88,8 @@ class FastRCNNLossComputation(object):
                     dtype=torch.float32, device=matched_idxs.device)
             from maskrcnn_benchmark.structures.bounding_box import BoxList
             matched_targets = BoxList(dummy_bbox, target.size, target.mode)
-            matched_targets.add_field('labels', torch.zeros(len(matched_idxs),
-                dtype=torch.float32,
-                device=matched_idxs.device))
+            matched_targets.add_field('labels', self.create_all_bkg_labels(
+                len(matched_idxs), matched_idxs.device))
         else:
             matched_targets = target[matched_idxs.clamp(min=0)]
         matched_targets.add_field("matched_idxs", matched_idxs)
@@ -235,12 +254,14 @@ def make_roi_box_loss_evaluator(cfg):
     cls_agnostic_bbox_reg = cfg.MODEL.CLS_AGNOSTIC_BBOX_REG
 
     classification_loss_type = cfg.MODEL.ROI_BOX_HEAD.CLASSIFICATION_LOSS
+    num_classes = cfg.MODEL.ROI_BOX_HEAD.NUM_CLASSES
     loss_evaluator = FastRCNNLossComputation(
         matcher, 
         fg_bg_sampler, 
         box_coder, 
         cls_agnostic_bbox_reg,
-        classification_loss_type
+        classification_loss_type,
+        num_classes,
     )
 
     return loss_evaluator
