@@ -31,10 +31,16 @@ def build_transforms(cfg, is_train=True):
         hue=hue,
     )
 
+    if not cfg.INPUT.USE_FIXED_SIZE_AUGMENTATION or not is_train:
+        resizer = T.Resize(min_size, max_size)
+    else:
+        from qd.qd_yolov2pt import ResizeAndPlaceForMaskRCNN
+        resizer = ResizeAndPlaceForMaskRCNN(cfg)
+
     transform = T.Compose(
         [
             color_jitter,
-            T.Resize(min_size, max_size),
+            resizer,
             T.RandomHorizontalFlip(flip_prob),
             T.ToTensor(),
             normalize_transform,
