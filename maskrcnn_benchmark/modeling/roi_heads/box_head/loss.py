@@ -47,6 +47,9 @@ class FastRCNNLossComputation(object):
             param = map(float, self.classification_loss_type[4:].split('_'))
             from qd.qd_pytorch import IBCEWithLogitsNegLoss
             self._classifier_loss = IBCEWithLogitsNegLoss(*param)
+        elif self.classification_loss_type == 'MCEB':
+            from qd.qd_pytorch import MCEBLoss
+            self._classifier_loss = MCEBLoss()
         else:
             assert self.classification_loss_type.startswith('tree')
             raise NotImplementedError('not tested')
@@ -220,7 +223,12 @@ class FastRCNNLossComputation(object):
                 box_loss = torch.tensor([0.], device=device)
             else:
                 sampled_pos_inds_subset = x[:, 0]
-                labels_pos = x[:, 1]
+                if self.num_classes == labels.shape[1]:
+                    labels_pos = x[:, 1]
+                else:
+                    # the first one is background
+                    assert self.num_classes == labels.shape[1] + 1
+                    labels_pos = x[:, 1] + 1
                 if self.cls_agnostic_bbox_reg:
                     map_inds = torch.tensor([4, 5, 6, 7], device=device)
                 else:
@@ -233,7 +241,7 @@ class FastRCNNLossComputation(object):
                     size_average=False,
                     beta=1,
                 )
-                box_loss = box_loss / labels_pos.numel()
+                box_loss = box_loss / labels.shape[0]
         return classification_loss, box_loss
 
 
