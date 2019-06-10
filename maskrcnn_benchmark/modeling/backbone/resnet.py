@@ -235,6 +235,68 @@ def _make_stage(
         in_channels = out_channels
     return nn.Sequential(*blocks)
 
+class BasicWithFixedBatchNorm(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        bottleneck_channels,
+        out_channels,
+        num_groups=1,
+        stride_in_1x1=True,
+        stride=1,
+        dilation=1,
+        dcn_config={}
+        ):
+        super(BasicWithFixedBatchNorm, self).__init__()
+        self.downsample = None
+        assert dilation == 1
+        norm_func = FrozenBatchNorm2d
+        if in_channels != out_channels:
+            down_stride = stride if dilation == 1 else 1
+            self.downsample = nn.Sequential(
+                Conv2d(
+                    in_channels, out_channels,
+                    kernel_size=1, stride=down_stride, bias=False
+                ),
+                norm_func(out_channels),
+            )
+            for modules in [self.downsample,]:
+                for l in modules.modules():
+                    if isinstance(l, Conv2d):
+                        nn.init.kaiming_uniform_(l.weight, a=1)
+
+        if dilation > 1:
+            # copied from BottleNet.
+            stride = 1 # reset to be 1
+        from torchvision.models.resnet import conv3x3
+        self.conv1 = conv3x3(in_channels, out_channels, stride)
+        self.bn1 = norm_func(out_channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = conv3x3(out_channels, out_channels)
+        self.bn2 = norm_func(out_channels)
+        self.stride = stride
+
+        for l in [self.conv1, self.conv2,]:
+            nn.init.kaiming_uniform_(l.weight, a=1)
+
+    def forward(self, x):
+        identity = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        if self.downsample is not None:
+            identity = self.downsample(x)
+
+        out += identity
+        out = self.relu(out)
+
+        return out
+
 
 class Bottleneck(nn.Module):
     def __init__(
@@ -429,6 +491,7 @@ class StemWithGN(BaseStem):
 
 
 _TRANSFORMATION_MODULES = Registry({
+    "BasicWithFixedBatchNorm": BasicWithFixedBatchNorm,
     "BottleneckWithFixedBatchNorm": BottleneckWithFixedBatchNorm,
     "BottleneckWithGN": BottleneckWithGN,
 })
