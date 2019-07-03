@@ -61,6 +61,7 @@ class MaskTSVDataset(TSVSplitImage):
         else:
             self.shuffle = None
         self.multi_hot_label = multi_hot_label
+        self._id_to_img_map = None
 
     def ensure_load_key_hw(self):
         if self.all_key_hw is None:
@@ -73,8 +74,10 @@ class MaskTSVDataset(TSVSplitImage):
     @property
     def id_to_img_map(self):
         self.ensure_load_key_hw()
-        return {i: key for i, (key, _) in
+        if self._id_to_img_map is None:
+            self._id_to_img_map = {i: key for i, (key, _) in
                     enumerate(self.all_key_hw)}
+        return self._id_to_img_map
 
     def get_keys(self):
         return [self.read_key_hw(i)[0] for i in range(len(self.hw_tsv))]

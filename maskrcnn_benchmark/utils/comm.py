@@ -11,19 +11,23 @@ import torch.distributed as dist
 
 
 def get_world_size():
-    if not dist.is_available():
-        return 1
-    if not dist.is_initialized():
-        return 1
-    return dist.get_world_size()
+    from qd.qd_common import get_mpi_size
+    return get_mpi_size()
+    #if not dist.is_available():
+        #return 1
+    #if not dist.is_initialized():
+        #return 1
+    #return dist.get_world_size()
 
 
 def get_rank():
-    if not dist.is_available():
-        return 0
-    if not dist.is_initialized():
-        return 0
-    return dist.get_rank()
+    from qd.qd_common import get_mpi_rank
+    return get_mpi_rank()
+    #if not dist.is_available():
+        #return 0
+    #if not dist.is_initialized():
+        #return 0
+    #return dist.get_rank()
 
 
 def is_main_process():
@@ -35,15 +39,21 @@ def synchronize():
     Helper function to synchronize (barrier) among all processes when
     using distributed training
     """
-    if not dist.is_available():
-        return
-    if not dist.is_initialized():
-        return
-    world_size = dist.get_world_size()
-    if world_size == 1:
-        return
-    dist.barrier()
-
+    from qd.qd_common import is_hvd_initialized
+    use_hvd = is_hvd_initialized()
+    if not use_hvd:
+        if not dist.is_available():
+            return
+        if not dist.is_initialized():
+            return
+        world_size = dist.get_world_size()
+        if world_size == 1:
+            return
+        dist.barrier()
+    else:
+        if get_world_size() > 1:
+            import horovod.torch as hvd
+            hvd.allreduce(torch.tensor(0), name='barrier')
 
 def all_gather(data):
     """

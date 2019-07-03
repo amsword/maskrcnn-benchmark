@@ -6,10 +6,9 @@ import time
 import torch
 import torch.distributed as dist
 
-from maskrcnn_benchmark.utils.comm import get_world_size
+from maskrcnn_benchmark.utils.comm import get_world_size, get_rank
 from maskrcnn_benchmark.utils.metric_logger import MetricLogger
 
-from apex import amp
 
 def reduce_loss_dict(loss_dict):
     """
@@ -27,8 +26,13 @@ def reduce_loss_dict(loss_dict):
             loss_names.append(k)
             all_losses.append(loss_dict[k])
         all_losses = torch.stack(all_losses, dim=0)
-        dist.reduce(all_losses, dst=0)
-        if dist.get_rank() == 0:
+        from qd.qd_common import is_hvd_initialized
+        if not is_hvd_initialized():
+            dist.reduce(all_losses, dst=0)
+        else:
+            import horovod.torch as hvd
+            all_losses = hvd.allreduce(all_losses, average=False)
+        if get_rank() == 0:
             # only main process gets accumulated, so only divide by
             # world_size in this case
             all_losses /= world_size
@@ -56,6 +60,8 @@ def do_train(
     start_training_time = time.time()
     end = time.time()
     log_start = time.time()
+    from qd.qd_common import is_hvd_initialized
+    use_hvd = is_hvd_initialized()
     for iteration, (images, targets, _) in enumerate(data_loader, start_iter):
         if len(images.image_sizes) == 0:
             continue
@@ -78,13 +84,17 @@ def do_train(
             logging.info('NaN encountered!')
             arguments['images'] = images
             arguments['targets'] = targets
-            checkpointer.save("NaN_context", **arguments)
+            checkpointer.save("NaN_context_{}".format(get_rank()), **arguments)
             raise RuntimeError('NaN encountered!')
 
         # reduce losses over all GPUs for logging purposes
-        loss_dict_reduced = reduce_loss_dict(loss_dict)
-        losses_reduced = sum(loss for loss in loss_dict_reduced.values())
-        meters.update(loss=losses_reduced, **loss_dict_reduced)
+        if not use_hvd:
+            loss_dict_reduced = reduce_loss_dict(loss_dict)
+            losses_reduced = sum(loss for loss in loss_dict_reduced.values())
+            meters.update(loss=losses_reduced, **loss_dict_reduced)
+        else:
+            losses_reduced = sum(loss for loss in loss_dict.values())
+            meters.update(loss=losses_reduced, **loss_dict)
 
         optimizer.zero_grad()
         # Note: If mixed precision is not used, this ends up doing nothing
@@ -92,8 +102,12 @@ def do_train(
         if device.type == 'cpu':
             losses.backward()
         else:
-            with amp.scale_loss(losses, optimizer) as scaled_losses:
-                scaled_losses.backward()
+            if not use_hvd:
+                from apex import amp
+                with amp.scale_loss(losses, optimizer) as scaled_losses:
+                    scaled_losses.backward()
+            else:
+                losses.backward()
         optimizer.step()
 
         batch_time = time.time() - end
