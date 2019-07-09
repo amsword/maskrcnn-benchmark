@@ -179,6 +179,8 @@ _C.MODEL.RPN.FPN_POST_NMS_PER_BATCH = True
 _C.MODEL.RPN.RPN_HEAD = "SingleConvRPNHead"
 
 
+_C.MODEL.RPN.USE_BN = False
+
 # ---------------------------------------------------------------------------- #
 # ROI HEADS options
 # ---------------------------------------------------------------------------- #

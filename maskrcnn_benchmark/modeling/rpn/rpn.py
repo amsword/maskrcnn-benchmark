@@ -84,17 +84,28 @@ class RPNHead(nn.Module):
             num_anchors (int): number of anchors to be predicted
         """
         super(RPNHead, self).__init__()
-        self.conv = nn.Conv2d(
-            in_channels, in_channels, kernel_size=3, stride=1, padding=1
-        )
+        use_bn = cfg.MODEL.RPN.USE_BN
+        if not use_bn:
+            conv = nn.Conv2d(
+                in_channels, in_channels, kernel_size=3, stride=1, padding=1
+            )
+            self.conv = conv
+        else:
+            conv = nn.Conv2d(
+                in_channels, in_channels, kernel_size=3, stride=1, padding=1,
+                bias=False,
+            )
+            bn = nn.BatchNorm2d(in_channels)
+            self.conv = nn.Sequential(conv, bn)
         self.cls_logits = nn.Conv2d(in_channels, num_anchors, kernel_size=1, stride=1)
         self.bbox_pred = nn.Conv2d(
             in_channels, num_anchors * 4, kernel_size=1, stride=1
         )
 
-        for l in [self.conv, self.cls_logits, self.bbox_pred]:
+        for l in [conv, self.cls_logits, self.bbox_pred]:
             torch.nn.init.normal_(l.weight, std=0.01)
-            torch.nn.init.constant_(l.bias, 0)
+            if l.bias is not None:
+                torch.nn.init.constant_(l.bias, 0)
 
     def forward(self, x):
         logits = []
