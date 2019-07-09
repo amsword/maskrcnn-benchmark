@@ -20,12 +20,26 @@ def make_optimizer(cfg, model):
     return optimizer
 
 
-def make_lr_scheduler(cfg, optimizer):
-    return WarmupMultiStepLR(
-        optimizer,
-        cfg.SOLVER.STEPS,
-        cfg.SOLVER.GAMMA,
-        warmup_factor=cfg.SOLVER.WARMUP_FACTOR,
-        warmup_iters=cfg.SOLVER.WARMUP_ITERS,
-        warmup_method=cfg.SOLVER.WARMUP_METHOD,
-    )
+def make_lr_scheduler(cfg, optimizer, last_epoch=-1):
+    lr_policy = cfg.SOLVER.LR_POLICY
+    assert lr_policy in ("multistep", "cosine")
+    if lr_policy == "multistep":
+        return WarmupMultiStepLR(
+            optimizer,
+            cfg.SOLVER.STEPS,
+            cfg.SOLVER.GAMMA,
+            warmup_factor=cfg.SOLVER.WARMUP_FACTOR,
+            warmup_iters=cfg.SOLVER.WARMUP_ITERS,
+            warmup_method=cfg.SOLVER.WARMUP_METHOD,
+            last_epoch=last_epoch,
+        )
+    elif lr_policy == "cosine":
+        from qd.opt import create_warmup_cosine_annealing_lr
+        return create_warmup_cosine_annealing_lr(
+            optimizer,
+            cfg.SOLVER.MAX_ITER,
+            warmup_factor=cfg.SOLVER.WARMUP_FACTOR,
+            warmup_iters=cfg.SOLVER.WARMUP_ITERS,
+            warmup_method=cfg.SOLVER.WARMUP_METHOD,
+            last_epoch=last_epoch,
+        )
