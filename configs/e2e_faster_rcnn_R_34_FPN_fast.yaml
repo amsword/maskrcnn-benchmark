@@ -1,6 +1,6 @@
 MODEL:
   META_ARCHITECTURE: "GeneralizedRCNN"
-  WEIGHT: "models/resnet34-v2-human-54.7.pth"
+  WEIGHT: "output/LuXiyangHuman/snapshot/resnet34-v2-human-54.7.pth"
   BACKBONE:
     CONV_BODY: "R-34-FPN-Fast"
   RESNETS:
