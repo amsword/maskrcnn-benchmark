@@ -107,8 +107,8 @@ _C.MODEL.BACKBONE.CONV_BODY = "R-50-C4"
 _C.MODEL.BACKBONE.FREEZE_CONV_BODY_AT = 2
 # whether to use BN or not in backbone
 _C.MODEL.BACKBONE.USE_BN = False
-# GN for backbone
-_C.MODEL.BACKBONE.USE_GN = False
+# GN for backbone, Don't use this variable. it is not used in backbone built
+#_C.MODEL.BACKBONE.USE_GN = False
 
 
 # ---------------------------------------------------------------------------- #
@@ -236,6 +236,7 @@ _C.MODEL.ROI_BOX_HEAD.NUM_STACKED_CONVS = 4
 
 _C.MODEL.ROI_BOX_HEAD.CLASSIFICATION_ACTIVATE = 'softmax' # or sigmoid, for testing
 _C.MODEL.ROI_BOX_HEAD.CLASSIFICATION_LOSS = 'CE' # or BCE . for training
+_C.MODEL.ROI_BOX_HEAD.BOUNDINGBOX_LOSS_TYPE = 'SL1' # SL1 or WSL1
 
 _C.MODEL.ROI_MASK_HEAD = CN()
 _C.MODEL.ROI_MASK_HEAD.FEATURE_EXTRACTOR = "ResNet50Conv5ROIFeatureExtractor"
