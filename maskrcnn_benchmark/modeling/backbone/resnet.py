@@ -21,6 +21,7 @@ from collections import namedtuple
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torchvision.models.resnet import conv3x3
 
 from maskrcnn_benchmark.layers import FrozenBatchNorm2d
 from maskrcnn_benchmark.layers import Conv2d
@@ -268,7 +269,6 @@ class BasicWithFixedBatchNorm(nn.Module):
         if dilation > 1:
             # copied from BottleNet.
             stride = 1 # reset to be 1
-        from torchvision.models.resnet import conv3x3
         self.conv1 = conv3x3(in_channels, out_channels, stride)
         self.bn1 = norm_func(out_channels)
         self.relu = nn.ReLU(inplace=True)
@@ -427,6 +427,56 @@ class BaseStem(nn.Module):
         x = F.max_pool2d(x, kernel_size=3, stride=2, padding=1)
         return x
 
+class ConvResStem(nn.Module):
+    def __init__(self, cfg):
+        super(ConvResStem, self).__init__()
+
+        C1 = cfg.MODEL.RESNETS.CONVRESSTEM.CONV_CHANNEL
+
+        C2 = cfg.MODEL.RESNETS.CONVRESSTEM.RES_CHANNEL1
+        n2 = cfg.MODEL.RESNETS.CONVRESSTEM.NUM_BLOCK_RES1
+        C3 = cfg.MODEL.RESNETS.STEM_OUT_CHANNELS
+        n3 = cfg.MODEL.RESNETS.CONVRESSTEM.NUM_BLOCK_RES2
+
+        res_module = cfg.MODEL.RESNETS.TRANS_FUNC
+        block_module = _TRANSFORMATION_MODULES[res_module]
+        convs = []
+        convs.append(conv3x3(3, C1))
+        from torch.nn import BatchNorm2d
+        convs.append(BatchNorm2d(C1))
+        convs.append(nn.ReLU(inplace=True))
+        self.stem_conv = nn.Sequential(*convs)
+        self.stem_res2 = _make_stage(
+                block_module,
+                in_channels=C1,
+                bottleneck_channels=C2//4,
+                out_channels=C2,
+                block_count=n2,
+                num_groups=1,
+                stride_in_1x1=cfg.MODEL.RESNETS.STRIDE_IN_1X1,
+                first_stride=1,
+                dilation=1,
+                dcn_config={},
+            )
+        self.stem_res3 = _make_stage(
+                block_module,
+                in_channels=C2,
+                bottleneck_channels=C3//4,
+                out_channels=C3,
+                block_count=n3,
+                num_groups=1,
+                stride_in_1x1=cfg.MODEL.RESNETS.STRIDE_IN_1X1,
+                first_stride=2,
+                dilation=1,
+                dcn_config={},
+            )
+
+    def forward(self, x):
+        x = self.stem_conv(x)
+        x = self.stem_res2(x)
+        x = self.stem_res3(x)
+        x = F.max_pool2d(x, kernel_size=3, stride=2, padding=1)
+        return x
 
 class BottleneckWithFixedBatchNorm(Bottleneck):
     def __init__(
@@ -499,6 +549,7 @@ _TRANSFORMATION_MODULES = Registry({
 _STEM_MODULES = Registry({
     "StemWithFixedBatchNorm": StemWithFixedBatchNorm,
     "StemWithGN": StemWithGN,
+    'ConvResStem': ConvResStem,
 })
 
 _STAGE_SPECS = Registry({
