@@ -99,6 +99,7 @@ class ResNet(nn.Module):
         num_groups = cfg.MODEL.RESNETS.NUM_GROUPS
         width_per_group = cfg.MODEL.RESNETS.WIDTH_PER_GROUP
         in_channels = cfg.MODEL.RESNETS.STEM_OUT_CHANNELS
+        use_se = cfg.MODEL.RESNETS.USE_SE
         stage2_bottleneck_channels = num_groups * width_per_group
         stage2_out_channels = cfg.MODEL.RESNETS.RES2_OUT_CHANNELS
         self.stages = []
@@ -122,7 +123,8 @@ class ResNet(nn.Module):
                     "stage_with_dcn": stage_with_dcn,
                     "with_modulated_dcn": cfg.MODEL.RESNETS.WITH_MODULATED_DCN,
                     "deformable_groups": cfg.MODEL.RESNETS.DEFORMABLE_GROUPS,
-                }
+                },
+                use_se=use_se,
             )
             in_channels = out_channels
             self.add_module(name, module)
@@ -164,7 +166,8 @@ class ResNetHead(nn.Module):
         stride_init=None,
         res2_out_channels=256,
         dilation=1,
-        dcn_config={}
+        dcn_config={},
+        use_se=False,
     ):
         super(ResNetHead, self).__init__()
 
@@ -192,7 +195,8 @@ class ResNetHead(nn.Module):
                 stride_in_1x1,
                 first_stride=stride,
                 dilation=dilation,
-                dcn_config=dcn_config
+                dcn_config=dcn_config,
+                use_se=use_se,
             )
             stride = None
             self.add_module(name, module)
@@ -215,7 +219,8 @@ def _make_stage(
     stride_in_1x1,
     first_stride,
     dilation=1,
-    dcn_config={}
+    dcn_config={},
+    use_se=False,
 ):
     blocks = []
     stride = first_stride
@@ -229,7 +234,8 @@ def _make_stage(
                 stride_in_1x1,
                 stride,
                 dilation=dilation,
-                dcn_config=dcn_config
+                dcn_config=dcn_config,
+                use_se=use_se,
             )
         )
         stride = 1
@@ -246,7 +252,8 @@ class BasicWithFixedBatchNorm(nn.Module):
         stride_in_1x1=True,
         stride=1,
         dilation=1,
-        dcn_config={}
+        dcn_config={},
+        use_se=False,
         ):
         super(BasicWithFixedBatchNorm, self).__init__()
         self.downsample = None
@@ -276,7 +283,16 @@ class BasicWithFixedBatchNorm(nn.Module):
         self.bn2 = norm_func(out_channels)
         self.stride = stride
 
-        for l in [self.conv1, self.conv2,]:
+        if use_se:
+            from mtorch.seresnext import SEResNext
+            self.seblock = SEResNext.SEBlock(out_channels, reduction_ratio=16)
+            for l in [self.seblock.fc0, self.seblock.fc1,]:
+                nn.init.kaiming_uniform_(l.weight, a=1)
+                nn.init.zeros_(l.bias)
+        else:
+            self.seblock = None
+
+        for l in [self.conv1,]:
             nn.init.kaiming_uniform_(l.weight, a=1)
 
     def forward(self, x):
@@ -288,6 +304,8 @@ class BasicWithFixedBatchNorm(nn.Module):
 
         out = self.conv2(out)
         out = self.bn2(out)
+        if self.seblock:
+            out = self.seblock(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)
@@ -309,7 +327,8 @@ class Bottleneck(nn.Module):
         stride,
         dilation,
         norm_func,
-        dcn_config
+        dcn_config,
+        use_se=False,
     ):
         super(Bottleneck, self).__init__()
 
@@ -380,6 +399,15 @@ class Bottleneck(nn.Module):
         )
         self.bn3 = norm_func(out_channels)
 
+        if use_se:
+            from mtorch.seresnext import SEResNext
+            self.seblock = SEResNext.SEBlock(out_channels, reduction_ratio=16)
+            for l in [self.seblock.fc0, self.seblock.fc1,]:
+                nn.init.kaiming_uniform_(l.weight, a=1)
+                nn.init.zeros_(l.bias)
+        else:
+            self.seblock = None
+
         for l in [self.conv1, self.conv3,]:
             nn.init.kaiming_uniform_(l.weight, a=1)
 
@@ -394,8 +422,11 @@ class Bottleneck(nn.Module):
         out = self.bn2(out)
         out = F.relu_(out)
 
-        out0 = self.conv3(out)
-        out = self.bn3(out0)
+        out = self.conv3(out)
+        out = self.bn3(out)
+
+        if self.seblock:
+            out = self.seblock(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)
@@ -488,7 +519,8 @@ class BottleneckWithFixedBatchNorm(Bottleneck):
         stride_in_1x1=True,
         stride=1,
         dilation=1,
-        dcn_config={}
+        dcn_config={},
+        use_se=False,
     ):
         super(BottleneckWithFixedBatchNorm, self).__init__(
             in_channels=in_channels,
@@ -499,7 +531,8 @@ class BottleneckWithFixedBatchNorm(Bottleneck):
             stride=stride,
             dilation=dilation,
             norm_func=FrozenBatchNorm2d,
-            dcn_config=dcn_config
+            dcn_config=dcn_config,
+            use_se=use_se,
         )
 
 
@@ -520,7 +553,8 @@ class BottleneckWithGN(Bottleneck):
         stride_in_1x1=True,
         stride=1,
         dilation=1,
-        dcn_config={}
+        dcn_config={},
+        use_se=False,
     ):
         super(BottleneckWithGN, self).__init__(
             in_channels=in_channels,
@@ -531,7 +565,8 @@ class BottleneckWithGN(Bottleneck):
             stride=stride,
             dilation=dilation,
             norm_func=group_norm,
-            dcn_config=dcn_config
+            dcn_config=dcn_config,
+            use_se=use_se,
         )
 
 
