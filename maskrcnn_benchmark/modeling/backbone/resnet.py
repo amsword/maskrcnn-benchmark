@@ -26,7 +26,7 @@ from torchvision.models.resnet import conv3x3
 from maskrcnn_benchmark.layers import FrozenBatchNorm2d
 from maskrcnn_benchmark.layers import Conv2d
 from maskrcnn_benchmark.layers import DFConv2d
-from maskrcnn_benchmark.modeling.make_layers import group_norm
+from maskrcnn_benchmark.modeling.make_layers import group_norm, frozen_batch_norm
 from maskrcnn_benchmark.utils.registry import Registry
 
 
@@ -258,7 +258,7 @@ class BasicWithFixedBatchNorm(nn.Module):
         super(BasicWithFixedBatchNorm, self).__init__()
         self.downsample = None
         assert dilation == 1
-        norm_func = FrozenBatchNorm2d
+        norm_func = frozen_batch_norm
         if in_channels != out_channels:
             down_stride = stride if dilation == 1 else 1
             self.downsample = nn.Sequential(
@@ -530,7 +530,7 @@ class BottleneckWithFixedBatchNorm(Bottleneck):
             stride_in_1x1=stride_in_1x1,
             stride=stride,
             dilation=dilation,
-            norm_func=FrozenBatchNorm2d,
+            norm_func=frozen_batch_norm,
             dcn_config=dcn_config,
             use_se=use_se,
         )

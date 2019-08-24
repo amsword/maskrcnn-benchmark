@@ -290,6 +290,11 @@ _C.MODEL.RESNETS.TRANS_FUNC = "BottleneckWithFixedBatchNorm"
 # ResNet's stem function (conv1 and pool1)
 _C.MODEL.RESNETS.STEM_FUNC = "StemWithFixedBatchNorm"
 
+# normalization eps. set is as 0 by default to make it compatible with the
+# official implemenation. It is better to set it 1e-5 if the init model comes
+# from torchvision or some model trained with the standard batch norm.
+_C.MODEL.RESNETS.BATCHNORM_EPS = 0.
+
 _C.MODEL.RESNETS.CONVRESSTEM = CN()
 _C.MODEL.RESNETS.CONVRESSTEM.CONV_CHANNEL = 4
 _C.MODEL.RESNETS.CONVRESSTEM.RES_CHANNEL1 = 8
