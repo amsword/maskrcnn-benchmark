@@ -539,7 +539,7 @@ class BottleneckWithFixedBatchNorm(Bottleneck):
 class StemWithFixedBatchNorm(BaseStem):
     def __init__(self, cfg):
         super(StemWithFixedBatchNorm, self).__init__(
-            cfg, norm_func=FrozenBatchNorm2d
+                cfg, norm_func=frozen_batch_norm
         )
 
 

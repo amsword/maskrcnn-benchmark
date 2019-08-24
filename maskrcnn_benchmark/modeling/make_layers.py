@@ -27,6 +27,10 @@ def get_group_gn(dim, dim_per_gp, num_groups):
 
     return group_gn
 
+def frozen_batch_norm(out_channels):
+    batch_norm_eps = cfg.MODEL.RESNETS.BATCHNORM_EPS
+    from maskrcnn_benchmark.layers.batch_norm import FrozenBatchNorm2d
+    return FrozenBatchNorm2d(out_channels, batch_norm_eps)
 
 def group_norm(out_channels, affine=True, divisor=1):
     out_channels = out_channels // divisor
