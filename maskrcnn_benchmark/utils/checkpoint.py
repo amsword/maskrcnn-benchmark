@@ -70,7 +70,8 @@ class Checkpointer(object):
         if "scheduler" in checkpoint and self.scheduler:
             if not model_only:
                 self.logger.info("Loading scheduler from {}".format(f))
-                self.scheduler.load_state_dict(checkpoint.pop("scheduler"))
+                from qd.qd_pytorch import load_scheduler_state
+                load_scheduler_state(self.scheduler, checkpoint.pop("scheduler"))
             else:
                 checkpoint.pop("scheduler")
         if model_only:
