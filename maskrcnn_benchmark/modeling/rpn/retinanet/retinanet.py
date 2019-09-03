@@ -39,7 +39,7 @@ class RetinaNetHead(torch.nn.Module):
                     padding=1
                 )
             )
-            cls_tower.append(nn.ReLU())
+            cls_tower.append(nn.ReLU(inplace=True))
             bbox_tower.append(
                 nn.Conv2d(
                     in_channels,
@@ -49,7 +49,7 @@ class RetinaNetHead(torch.nn.Module):
                     padding=1
                 )
             )
-            bbox_tower.append(nn.ReLU())
+            bbox_tower.append(nn.ReLU(inplace=True))
 
         self.add_module('cls_tower', nn.Sequential(*cls_tower))
         self.add_module('bbox_tower', nn.Sequential(*bbox_tower))
