@@ -5,6 +5,23 @@ from .bounding_box import BoxList
 
 from maskrcnn_benchmark.layers import nms as _box_nms
 
+def boxlist_softnms(boxlist, sigma):
+    # need to improve from the speed side
+    if len(boxlist) == 0:
+        return boxlist
+    device = boxlist.bbox.device
+    boxlist = boxlist.to('cpu')
+    boxlist = boxlist.convert('xyxy')
+    assert len(boxlist.fields()) == 1
+    rects = [{'rect': list(map(float, b)), 'conf': float(s)} for b, s in zip(boxlist.bbox,
+            boxlist.get_field('scores'))]
+    from qd.qd_common import softnms_c
+    rects = softnms_c(rects, sigma=sigma, method=2)
+    bbox = torch.tensor([r['rect'] for r in rects])
+    scores = torch.tensor([r['conf'] for r in rects])
+    result = BoxList(bbox, boxlist.size)
+    result.add_field('scores', scores)
+    return result.to(device)
 
 def boxlist_nms(boxlist, nms_thresh, max_proposals=-1, score_field="scores"):
     """
