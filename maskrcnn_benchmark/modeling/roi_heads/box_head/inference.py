@@ -1,13 +1,20 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+import logging
 import torch
 import torch.nn.functional as F
 from torch import nn
 
 from maskrcnn_benchmark.structures.bounding_box import BoxList
-from maskrcnn_benchmark.structures.boxlist_ops import boxlist_nms
 from maskrcnn_benchmark.structures.boxlist_ops import cat_boxlist
 from maskrcnn_benchmark.modeling.box_coder import BoxCoder
 
+def create_nms_func(nms_policy):
+    if nms_policy.TYPE == 'nms':
+        from maskrcnn_benchmark.structures.boxlist_ops import boxlist_nms
+        return lambda x: boxlist_nms(x, nms_policy.THRESH)
+    elif nms_policy.TYPE == 'softnms':
+        from maskrcnn_benchmark.structures.boxlist_ops import boxlist_softnms
+        return lambda x: boxlist_softnms(x, nms_policy.THRESH)
 
 class PostProcessor(nn.Module):
     """
@@ -24,6 +31,7 @@ class PostProcessor(nn.Module):
         box_coder=None,
         cls_agnostic_bbox_reg=False,
         classification_activate='softmax',
+        nms_policy=None,
     ):
         """
         Arguments:
@@ -35,6 +43,12 @@ class PostProcessor(nn.Module):
         super(PostProcessor, self).__init__()
         self.score_thresh = score_thresh
         self.nms = nms
+        if nms_policy is not None:
+            if nms_policy.TYPE != 'nms':
+                logging.info('apply {} rather than standard nms'.format(nms_policy.TYPE))
+            elif nms_policy.THRESH != self.nms:
+                logging.info('nms threshold = {}'.format(nms_policy.THRESH))
+        self.nms_func = create_nms_func(nms_policy)
         self.detections_per_img = detections_per_img
         if box_coder is None:
             box_coder = BoxCoder(weights=(10., 10., 5., 5.))
@@ -135,9 +149,7 @@ class PostProcessor(nn.Module):
             boxes_j = boxes[inds, j * 4 : (j + 1) * 4]
             boxlist_for_class = BoxList(boxes_j, boxlist.size, mode="xyxy")
             boxlist_for_class.add_field("scores", scores_j)
-            boxlist_for_class = boxlist_nms(
-                boxlist_for_class, self.nms
-            )
+            boxlist_for_class = self.nms_func(boxlist_for_class)
             num_labels = len(boxlist_for_class)
             boxlist_for_class.add_field(
                 "labels", torch.full((num_labels,), j, dtype=torch.int64, device=device)
@@ -170,6 +182,7 @@ def make_roi_box_post_processor(cfg):
     detections_per_img = cfg.MODEL.ROI_HEADS.DETECTIONS_PER_IMG
     cls_agnostic_bbox_reg = cfg.MODEL.CLS_AGNOSTIC_BBOX_REG
     classification_activate = cfg.MODEL.ROI_BOX_HEAD.CLASSIFICATION_ACTIVATE
+    nms_policy = cfg.MODEL.ROI_HEADS.NMS_POLICY
 
     postprocessor = PostProcessor(
         score_thresh,
@@ -177,6 +190,7 @@ def make_roi_box_post_processor(cfg):
         detections_per_img,
         box_coder,
         cls_agnostic_bbox_reg,
-        classification_activate=classification_activate
+        classification_activate=classification_activate,
+        nms_policy=nms_policy,
     )
     return postprocessor

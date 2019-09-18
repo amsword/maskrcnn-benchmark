@@ -213,6 +213,9 @@ _C.MODEL.ROI_HEADS.SCORE_THRESH = 0.05
 # Overlap threshold used for non-maximum suppression (suppress boxes with
 # IoU >= this threshold)
 _C.MODEL.ROI_HEADS.NMS = 0.5
+_C.MODEL.ROI_HEADS.NMS_POLICY = CN()
+_C.MODEL.ROI_HEADS.NMS_POLICY.TYPE = 'nms' # nms or softnms
+_C.MODEL.ROI_HEADS.NMS_POLICY.THRESH = 0.5
 # Maximum number of detections to return per image (100 is based on the limit
 # established for the COCO dataset)
 _C.MODEL.ROI_HEADS.DETECTIONS_PER_IMG = 100
