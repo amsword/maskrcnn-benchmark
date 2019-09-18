@@ -39,6 +39,71 @@ def reduce_loss_dict(loss_dict):
         reduced_losses = {k: v for k, v in zip(loss_names, all_losses)}
     return reduced_losses
 
+def forward_backward(model, images, targets,
+        optimizer,
+        arguments, checkpointer, use_hvd,
+        meters, device, loss_scalar):
+     loss_dict = model(images, targets)
+
+     losses = sum(loss for loss in loss_dict.values()) * loss_scalar
+     if losses != losses:
+         logging.info('NaN encountered!')
+         arguments['images'] = images
+         arguments['targets'] = targets
+         checkpointer.save("NaN_context_{}".format(get_rank()), **arguments)
+         raise RuntimeError('NaN encountered!')
+
+     # reduce losses over all GPUs for logging purposes
+     if not use_hvd:
+         loss_dict_reduced = reduce_loss_dict(loss_dict)
+         losses_reduced = sum(loss for loss in loss_dict_reduced.values())
+         meters.update(loss=losses_reduced, **loss_dict_reduced)
+     else:
+         losses_reduced = sum(loss for loss in loss_dict.values())
+         meters.update(loss=losses_reduced, **loss_dict)
+
+     # Note: If mixed precision is not used, this ends up doing nothing
+     # Otherwise apply loss scaling for mixed-precision recipe
+     if device.type == 'cpu':
+         losses.backward()
+     else:
+         if not use_hvd:
+             from apex import amp
+             with amp.scale_loss(losses, optimizer) as scaled_losses:
+                 scaled_losses.backward()
+         else:
+             losses.backward()
+
+def partition_data(images, targets, num):
+    if num == 1 or len(images.image_sizes) < num:
+        return [(images, targets)]
+    each = len(images.image_sizes) // num
+    result = []
+    from maskrcnn_benchmark.structures.image_list import ImageList
+    for i in range(num):
+        start = i * each
+        end = start + each
+        curr_tensors = images.tensors[start: end]
+        curr_sizes = images.image_sizes[start: end]
+        curr_imagelist = ImageList(curr_tensors, curr_sizes)
+        curr_target = targets[start: end]
+        result.append((curr_imagelist, curr_target))
+    return result
+
+def average_gradients(model):
+    size = dist.get_world_size()
+    if size == 1:
+        return
+    size = float(size)
+    for param in model.parameters():
+        if param.requires_grad:
+            dist.all_reduce(param.grad.data, op=dist.reduce_op.SUM)
+            param.grad.data /= size
+
+from qd.qd_common import try_once
+@try_once
+def try_save_intermediate_snapshot(checkpointer, iteration, arguments):
+    checkpointer.save("model_{:07d}".format(iteration), **arguments)
 
 def do_train(
     model,
@@ -50,6 +115,8 @@ def do_train(
     checkpoint_period,
     arguments,
     log_step=20,
+    data_partition=1,
+    explicit_average_grad=False,
 ):
     logger = logging.getLogger("maskrcnn_benchmark.trainer")
     logger.info("Start training")
@@ -77,37 +144,19 @@ def do_train(
         else:
             targets = [target.to(device) for target in targets]
 
-        loss_dict = model(images, targets)
-
-        losses = sum(loss for loss in loss_dict.values())
-        if losses != losses:
-            logging.info('NaN encountered!')
-            arguments['images'] = images
-            arguments['targets'] = targets
-            checkpointer.save("NaN_context_{}".format(get_rank()), **arguments)
-            raise RuntimeError('NaN encountered!')
-
-        # reduce losses over all GPUs for logging purposes
-        if not use_hvd:
-            loss_dict_reduced = reduce_loss_dict(loss_dict)
-            losses_reduced = sum(loss for loss in loss_dict_reduced.values())
-            meters.update(loss=losses_reduced, **loss_dict_reduced)
-        else:
-            losses_reduced = sum(loss for loss in loss_dict.values())
-            meters.update(loss=losses_reduced, **loss_dict)
-
         optimizer.zero_grad()
-        # Note: If mixed precision is not used, this ends up doing nothing
-        # Otherwise apply loss scaling for mixed-precision recipe
-        if device.type == 'cpu':
-            losses.backward()
-        else:
-            if not use_hvd:
-                from apex import amp
-                with amp.scale_loss(losses, optimizer) as scaled_losses:
-                    scaled_losses.backward()
-            else:
-                losses.backward()
+
+        all_image_target = partition_data(images,
+                targets, data_partition)
+
+        for curr_images, curr_target in all_image_target:
+            forward_backward(model, curr_images, curr_target,
+                    optimizer,
+                    arguments, checkpointer, use_hvd,
+                    meters, device, loss_scalar=1./data_partition)
+        if explicit_average_grad:
+            average_gradients(model)
+
         optimizer.step()
 
         batch_time = time.time() - end
