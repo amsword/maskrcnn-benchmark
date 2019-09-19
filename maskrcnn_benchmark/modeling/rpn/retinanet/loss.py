@@ -39,6 +39,7 @@ class RetinaNetLossComputation(RPNLossComputation):
         self.generate_labels_func = generate_labels_func
         self.discard_cases = ['between_thresholds']
         self.regress_norm = regress_norm
+        self.num_valid_iter = 0
 
     def __call__(self, anchors, box_cls, box_regression, targets):
         """

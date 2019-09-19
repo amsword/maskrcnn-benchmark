@@ -130,6 +130,10 @@ class PostProcessor(nn.Module):
         """
         # unwrap the boxlist to avoid additional overhead.
         # if we had multi-class NMS, we could perform this directly on the boxlist
+
+        # cpu version is faster than gpu. revert it to gpu only by verifying
+        boxlist = boxlist.to('cpu')
+
         boxes = boxlist.bbox.reshape(-1, num_classes * 4)
         scores = boxlist.get_field("scores").reshape(-1, num_classes)
 
@@ -145,6 +149,8 @@ class PostProcessor(nn.Module):
             cls_start_idx = 0
         for j in range(cls_start_idx, num_classes):
             inds = inds_all[:, j].nonzero().squeeze(1)
+            if len(inds) == 0:
+                continue
             scores_j = scores[inds, j]
             boxes_j = boxes[inds, j * 4 : (j + 1) * 4]
             boxlist_for_class = BoxList(boxes_j, boxlist.size, mode="xyxy")
