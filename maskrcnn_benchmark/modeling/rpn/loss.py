@@ -35,9 +35,10 @@ class RPNLossComputation(object):
         self.proposal_matcher = proposal_matcher
         self.fg_bg_sampler = fg_bg_sampler
         self.box_coder = box_coder
-        self.copied_fields = []
+        self.copied_fields = ['tightness']
         self.generate_labels_func = generate_labels_func
         self.discard_cases = ['not_visibility', 'between_thresholds']
+        self.num_valid_iter = 0
 
     def match_targets_to_anchors(self, anchor, target, copied_fields=[]):
         match_quality_matrix = boxlist_iou(target, anchor)
@@ -63,6 +64,17 @@ class RPNLossComputation(object):
                             'non-empty fields')
         else:
             matched_targets = target[matched_idxs.clamp(min=0)]
+            if (self.num_valid_iter % 300) == 0:
+                # only print debug information
+                max_val, _ = match_quality_matrix.max(dim=1)
+                import logging
+                logging.info('GT->Anchor: num={}; Mean={}; min={}; max={}'.format(
+                    len(max_val),
+                    max_val.mean(),
+                    max_val.min(),
+                    max_val.max()))
+            self.num_valid_iter += 1
+
         matched_targets.add_field("matched_idxs", matched_idxs)
         return matched_targets
 
@@ -70,6 +82,8 @@ class RPNLossComputation(object):
         labels = []
         regression_targets = []
         for anchors_per_image, targets_per_image in zip(anchors, targets):
+            if targets_per_image.has_field('tightness'):
+                targets_per_image = targets_per_image[targets_per_image.get_field('tightness') > 0.9]
             matched_targets = self.match_targets_to_anchors(
                 anchors_per_image, targets_per_image, self.copied_fields
             )

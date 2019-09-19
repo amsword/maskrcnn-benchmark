@@ -23,7 +23,6 @@ import torch.nn.functional as F
 from torch import nn
 from torchvision.models.resnet import conv3x3
 
-from maskrcnn_benchmark.layers import FrozenBatchNorm2d
 from maskrcnn_benchmark.layers import Conv2d
 from maskrcnn_benchmark.layers import DFConv2d
 from maskrcnn_benchmark.modeling.make_layers import group_norm, frozen_batch_norm
@@ -279,7 +278,27 @@ class BasicWithFixedBatchNorm(nn.Module):
         self.conv1 = conv3x3(in_channels, out_channels, stride)
         self.bn1 = norm_func(out_channels)
         self.relu = nn.ReLU(inplace=True)
-        self.conv2 = conv3x3(out_channels, out_channels)
+
+        with_dcn = dcn_config.get("stage_with_dcn", False)
+        if with_dcn:
+            deformable_groups = dcn_config.get("deformable_groups", 1)
+            with_modulated_dcn = dcn_config.get("with_modulated_dcn", False)
+            self.conv2 = DFConv2d(
+                out_channels,
+                out_channels,
+                with_modulated_dcn=with_modulated_dcn,
+                kernel_size=3,
+                stride=1,
+                groups=num_groups,
+                dilation=dilation,
+                deformable_groups=deformable_groups,
+                bias=False,
+            )
+        else:
+            self.conv2 = conv3x3(out_channels, out_channels,
+                    groups=num_groups)
+            nn.init.kaiming_uniform_(self.conv2.weight, a=1)
+
         self.bn2 = norm_func(out_channels)
         self.stride = stride
 
@@ -450,12 +469,14 @@ class BaseStem(nn.Module):
 
         for l in [self.conv1,]:
             nn.init.kaiming_uniform_(l.weight, a=1)
+        self.relu = nn.ReLU(inplace=True)
+        self.max_pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
     def forward(self, x):
         x = self.conv1(x)
         x = self.bn1(x)
-        x = F.relu_(x)
-        x = F.max_pool2d(x, kernel_size=3, stride=2, padding=1)
+        x = self.relu(x)
+        x = self.max_pool(x)
         return x
 
 class ConvResStem(nn.Module):

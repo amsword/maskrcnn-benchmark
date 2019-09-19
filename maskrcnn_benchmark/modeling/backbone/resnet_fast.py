@@ -2,7 +2,7 @@
 
 import torch.nn as nn
 from torch.nn import BatchNorm2d
-from maskrcnn_benchmark.layers import FrozenBatchNorm2d
+from maskrcnn_benchmark.modeling.make_layers import frozen_batch_norm
 
 def conv3x3(in_planes, out_planes, stride=1):
     """3x3 convolution with padding"""
@@ -18,7 +18,7 @@ def conv1x1(in_planes, out_planes, stride=1):
 class BasicBlock(nn.Module):
     expansion = 1
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None, normf=FrozenBatchNorm2d):
+    def __init__(self, inplanes, planes, stride=1, downsample=None, normf=frozen_batch_norm):
         super(BasicBlock, self).__init__()
         self.conv1 = conv3x3(inplanes, planes, stride)
         self.bn1 = normf(planes)
@@ -56,7 +56,7 @@ class ResNet(nn.Module):
         if cfg.MODEL.BACKBONE.USE_BN:
             normf = BatchNorm2d
         else:
-            normf = FrozenBatchNorm2d
+            normf = frozen_batch_norm
 
         self.inplanes = 16
         self.conv1 = nn.Conv2d(3, 16, kernel_size=7, stride=2, padding=3, bias=False)
@@ -76,7 +76,7 @@ class ResNet(nn.Module):
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
                 conv1x1(self.inplanes, planes * block.expansion, stride),
-                FrozenBatchNorm2d(planes * block.expansion),
+                frozen_batch_norm(planes * block.expansion),
             )
 
         layers = []

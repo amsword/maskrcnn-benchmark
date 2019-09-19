@@ -10,27 +10,6 @@ from qd.qd_pytorch import TSVSplitImage
 from qd.tsv_io import TSVDataset
 
 
-def merge_class_names_by_location_id(anno):
-    if any('location_id' in a for a in anno):
-        assert all('location_id' in a for a in anno)
-        location_id_rect = [(a['location_id'], a) for a in anno]
-        from qd.qd_common import list_to_dict
-        location_id_to_rects = list_to_dict(location_id_rect, 0)
-        merged_anno = []
-        for _, rects in location_id_to_rects.items():
-            import copy
-            r = copy.deepcopy(rects[0])
-            r['class'] = [r['class']]
-            r['class'].extend((rects[i]['class'] for i in range(1,
-                len(rects))))
-            merged_anno.append(r)
-        return merged_anno
-    else:
-        assert all('location_id' not in a for a in anno)
-        for a in anno:
-            a['class'] = [a['class']]
-        return anno
-
 class MaskTSVDataset(TSVSplitImage):
 
     """Docstring for MaskTSVDataset. """
@@ -38,7 +17,8 @@ class MaskTSVDataset(TSVSplitImage):
     def __init__(self, data, split, version=0, transforms=None,
             multi_hot_label=False,
             cache_policy=None, labelmap=None,
-            remove_images_without_annotations=True):
+            remove_images_without_annotations=True,
+            bgr2rgb=False):
         # we will not use the super class's transform, but uses transforms
         # instead
         super(MaskTSVDataset, self).__init__(data, split, version=version,
@@ -62,6 +42,7 @@ class MaskTSVDataset(TSVSplitImage):
             self.shuffle = None
         self.multi_hot_label = multi_hot_label
         self._id_to_img_map = None
+        self.bgr2rgb = bgr2rgb
 
     def ensure_load_key_hw(self):
         if self.all_key_hw is None:
@@ -102,6 +83,13 @@ class MaskTSVDataset(TSVSplitImage):
         else:
             return self.get_item_multi_hot_label(idx)
 
+    def add_tightness(self, target, anno):
+        tightness = [rect.get('tightness', 1) for rect in anno]
+        tightness = torch.ones(len(anno))
+        for i in range(len(tightness)):
+            tightness[i] = anno[i].get('tightness', 1)
+        target.add_field('tightness', tightness)
+
     def get_item_multi_hot_label(self, idx):
         if self.shuffle:
             idx = self.shuffle[idx]
@@ -109,6 +97,9 @@ class MaskTSVDataset(TSVSplitImage):
         # we randomly select the max_box results. in the future, we should put it
         # in the Transform
         max_box = 300
+        if self.bgr2rgb:
+            import cv2
+            cv_im = cv2.cvtColor(cv_im, cv2.COLOR_BGR2RGB)
 
         img = transforms.ToPILImage()(cv_im)
 
@@ -117,6 +108,7 @@ class MaskTSVDataset(TSVSplitImage):
 
         anno = [a for a in anno if a['class'] in self.label_to_idx]
 
+        from qd.qd_common import merge_class_names_by_location_id
         anno = merge_class_names_by_location_id(anno)
         # it will occupy 10G if it is 300 for one image.
         if len(anno) > max_box:
@@ -130,9 +122,11 @@ class MaskTSVDataset(TSVSplitImage):
         # the first one is for background
         classes = torch.zeros((len(anno), len(self.label_to_idx)))
         for i, obj in enumerate(anno):
-            for c in obj['class']:
-                classes[i, self.label_to_idx[c]] = 1
+            for c, conf in zip(obj['class'], obj['conf']):
+                classes[i, self.label_to_idx[c]] = conf
         target.add_field("labels", classes)
+
+        self.add_tightness(target, anno)
 
         assert not self.use_seg, 'not tested'
         #masks = [obj["segmentation"] for obj in anno]
@@ -163,6 +157,9 @@ class MaskTSVDataset(TSVSplitImage):
             # in this case, all locations should be unique for now.
             assert len(set(a['location_id'] for a in anno)) == len(anno)
 
+        if self.bgr2rgb:
+            import cv2
+            cv_im = cv2.cvtColor(cv_im, cv2.COLOR_BGR2RGB)
         img = transforms.ToPILImage()(cv_im)
 
         # coco data has this kind of property
@@ -178,6 +175,8 @@ class MaskTSVDataset(TSVSplitImage):
         classes = [self.label_to_idx[obj["class"]] + 1 for obj in anno]
         classes = torch.tensor(classes)
         target.add_field("labels", classes)
+
+        self.add_tightness(target, anno)
 
         if self.use_seg:
             masks = [obj["segmentation"] for obj in anno]

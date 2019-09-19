@@ -12,7 +12,8 @@ class FPN(nn.Module):
     """
 
     def __init__(
-        self, in_channels_list, out_channels, conv_block, top_blocks=None
+        self, in_channels_list, out_channels, conv_block, top_blocks=None,
+        interpolate_mode='nearest'
     ):
         """
         Arguments:
@@ -39,6 +40,7 @@ class FPN(nn.Module):
             self.inner_blocks.append(inner_block)
             self.layer_blocks.append(layer_block)
         self.top_blocks = top_blocks
+        self.interpolate_mode = interpolate_mode
 
     def forward(self, x):
         """
@@ -56,7 +58,8 @@ class FPN(nn.Module):
         ):
             if not inner_block:
                 continue
-            inner_top_down = F.interpolate(last_inner, scale_factor=2, mode="nearest")
+            inner_top_down = F.interpolate(last_inner, scale_factor=2,
+                    mode=self.interpolate_mode)
             inner_lateral = getattr(self, inner_block)(feature)
             # TODO use size instead of scale to make it robust to different sizes
             # inner_top_down = F.upsample(last_inner, size=inner_lateral.shape[-2:],

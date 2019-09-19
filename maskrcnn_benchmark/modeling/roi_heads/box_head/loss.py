@@ -97,7 +97,7 @@ class FastRCNNLossComputation(object):
         match_quality_matrix = boxlist_iou(target, proposal)
         matched_idxs = self.proposal_matcher(match_quality_matrix)
         # Fast RCNN only need "labels" field for selecting the targets
-        target = target.copy_with_fields("labels")
+        target = target.copy_with_fields(["labels", 'tightness'])
         # get the targets corresponding GT for each proposal
         # NB: need to clamp the indices because we can have a single
         # GT in the image, and matched_idxs can be -2, which goes
@@ -109,6 +109,8 @@ class FastRCNNLossComputation(object):
             matched_targets = BoxList(dummy_bbox, target.size, target.mode)
             matched_targets.add_field('labels', self.create_all_bkg_labels(
                 len(matched_idxs), matched_idxs.device))
+            matched_targets.add_field('tightness', torch.zeros(len(matched_idxs),
+                        device=matched_idxs.device))
         else:
             matched_targets = target[matched_idxs.clamp(min=0)]
         matched_targets.add_field("matched_idxs", matched_idxs)
@@ -123,6 +125,7 @@ class FastRCNNLossComputation(object):
         labels = []
         regression_targets = []
         matched_ious = []
+        regression_tightness = []
         for proposals_per_image, targets_per_image in zip(proposals, targets):
             matched_targets = self.match_targets_to_proposals(
                 proposals_per_image, targets_per_image
@@ -146,11 +149,13 @@ class FastRCNNLossComputation(object):
 
             labels.append(labels_per_image)
             regression_targets.append(regression_targets_per_image)
+            regression_tightness.append(matched_targets.get_field('tightness'))
             if matched_targets.has_field('matched_iou'):
                 matched_ious.append(matched_targets.get_field('matched_iou'))
 
         result = {'labels': labels,
-                'regression_targets': regression_targets}
+                'regression_targets': regression_targets,
+                'regression_tightness': regression_tightness}
 
         if len(matched_ious) > 0:
             assert len(matched_ious) == len(regression_targets)
@@ -170,17 +175,19 @@ class FastRCNNLossComputation(object):
         """
         prepare_info = self.prepare_targets(proposals, targets)
         labels, regression_targets = prepare_info['labels'], prepare_info['regression_targets']
+        regression_tightness = prepare_info['regression_tightness']
         sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
 
         proposals = list(proposals)
         # add corresponding label and regression_targets information to the bounding boxes
-        for i, (labels_per_image, regression_targets_per_image, proposals_per_image) in enumerate(zip(
-            labels, regression_targets, proposals
+        for i, (labels_per_image, regression_targets_per_image, proposals_per_image, rt) in enumerate(zip(
+            labels, regression_targets, proposals, regression_tightness
         )):
             proposals_per_image.add_field("labels", labels_per_image)
             proposals_per_image.add_field(
                 "regression_targets", regression_targets_per_image
             )
+            proposals_per_image.add_field('regression_tightness', rt)
             if 'matched_ious' in prepare_info:
                 proposals_per_image.add_field(
                         'matched_ious', prepare_info['matched_ious'][i])
@@ -224,6 +231,9 @@ class FastRCNNLossComputation(object):
         regression_targets = cat(
             [proposal.get_field("regression_targets") for proposal in proposals], dim=0
         )
+        regression_tightness = cat(
+            [proposal.get_field("regression_tightness") for proposal in proposals], dim=0
+        )
 
         classification_loss = self._classifier_loss(class_logits, labels)
 
@@ -231,9 +241,10 @@ class FastRCNNLossComputation(object):
             # get indices that correspond to the regression targets for
             # the corresponding ground truth labels, to be used with
             # advanced indexing
-            sampled_pos_inds_subset = torch.nonzero(labels > 0).squeeze(1)
+            sampled_pos_inds_subset = torch.nonzero((labels > 0) &
+                    (regression_tightness > 0.9)).squeeze(1)
             if sampled_pos_inds_subset.numel() == 0:
-                box_loss = torch.tensor([0.], device=device)
+                box_loss = torch.tensor(0., device=device)
             else:
                 labels_pos = labels[sampled_pos_inds_subset]
                 if self.cls_agnostic_bbox_reg:
@@ -262,19 +273,20 @@ class FastRCNNLossComputation(object):
                 box_loss = box_loss / labels.numel()
         else:
             assert labels.dim() == 2
-            x = torch.nonzero(labels > 0)
+            x = torch.nonzero((labels > 0) & (regression_tightness > 0.9)[:, None])
             if x.numel() == 0:
-                box_loss = torch.tensor([0.], device=device)
+                box_loss = torch.tensor(0., device=device)
             else:
                 sampled_pos_inds_subset = x[:, 0]
                 if self.num_classes == labels.shape[1]:
                     labels_pos = x[:, 1]
                 else:
+                    raise Exception('we should never reached here')
                     # the first one is background
                     assert self.num_classes == labels.shape[1] + 1
                     labels_pos = x[:, 1] + 1
                 if self.cls_agnostic_bbox_reg:
-                    map_inds = torch.tensor([4, 5, 6, 7], device=device)
+                    map_inds = torch.tensor([0, 1, 2, 3], device=device)
                 else:
                     map_inds = 4 * labels_pos[:, None] + torch.tensor(
                         [0, 1, 2, 3], device=device)

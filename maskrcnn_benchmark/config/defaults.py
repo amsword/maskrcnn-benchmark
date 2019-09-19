@@ -116,7 +116,9 @@ _C.MODEL.BACKBONE.USE_BN = False
 # ---------------------------------------------------------------------------- #
 _C.MODEL.FPN = CN()
 _C.MODEL.FPN.USE_GN = False
+_C.MODEL.FPN.USE_BN = False
 _C.MODEL.FPN.USE_RELU = False
+_C.MODEL.FPN.INTERPOLATE_MODE='nearest' # or bilinear
 
 
 # ---------------------------------------------------------------------------- #
@@ -460,6 +462,8 @@ _C.TEST.IMS_PER_BATCH = 8
 # Number of detections per image
 _C.TEST.DETECTIONS_PER_IMG = 100
 
+# min size of box during inference, only keep boxes with both sides >= min_size
+_C.TEST.BOX_MIN_SIZE = 0
 
 # ---------------------------------------------------------------------------- #
 # Misc options

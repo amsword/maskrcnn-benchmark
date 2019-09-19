@@ -35,9 +35,11 @@ def build_resnet_fpn_backbone_fast(cfg):
         ],
         out_channels=out_channels,
         conv_block=conv_with_kaiming_uniform(
+            cfg.MODEL.FPN.USE_BN,
             cfg.MODEL.FPN.USE_GN, cfg.MODEL.FPN.USE_RELU
         ),
         top_blocks=fpn_module.LastLevelMaxPool(),
+        interpolate_mode=cfg.MODEL.FPN.INTERPOLATE_MODE,
     )
     model = nn.Sequential(OrderedDict([("body", body), ("fpn", fpn)]))
     model.out_channels = out_channels
@@ -60,9 +62,11 @@ def build_resnet_fpn_backbone(cfg):
         ],
         out_channels=out_channels,
         conv_block=conv_with_kaiming_uniform(
+            cfg.MODEL.FPN.USE_BN,
             cfg.MODEL.FPN.USE_GN, cfg.MODEL.FPN.USE_RELU
         ),
         top_blocks=fpn_module.LastLevelMaxPool(),
+        interpolate_mode=cfg.MODEL.FPN.INTERPOLATE_MODE,
     )
     model = nn.Sequential(OrderedDict([("body", body), ("fpn", fpn)]))
     model.out_channels = out_channels
@@ -86,9 +90,11 @@ def build_resnet_fpn_p3p7_backbone(cfg):
         ],
         out_channels=out_channels,
         conv_block=conv_with_kaiming_uniform(
+            cfg.MODEL.FPN.USE_BN,
             cfg.MODEL.FPN.USE_GN, cfg.MODEL.FPN.USE_RELU
         ),
         top_blocks=fpn_module.LastLevelP6P7(in_channels_p6p7, out_channels),
+        interpolate_mode=cfg.MODEL.FPN.INTERPOLATE_MODE,
     )
     model = nn.Sequential(OrderedDict([("body", body), ("fpn", fpn)]))
     model.out_channels = out_channels

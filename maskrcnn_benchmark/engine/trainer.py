@@ -25,6 +25,12 @@ def reduce_loss_dict(loss_dict):
         for k in sorted(loss_dict.keys()):
             loss_names.append(k)
             all_losses.append(loss_dict[k])
+        name_dims = [(k, v.dim()) for k, v in zip(loss_names, all_losses)]
+        for k in range(1, len(name_dims)):
+            if name_dims[k][1] != name_dims[0][1]:
+                logging.info('{}={} not equal {}={}'.format(name_dims[k][0],
+                    name_dims[k][1], name_dims[0][0], name_dims[0][1]))
+                raise Exception()
         all_losses = torch.stack(all_losses, dim=0)
         from qd.qd_common import is_hvd_initialized
         if not is_hvd_initialized():
@@ -130,7 +136,9 @@ def do_train(
     from qd.qd_common import is_hvd_initialized
     use_hvd = is_hvd_initialized()
     for iteration, (images, targets, _) in enumerate(data_loader, start_iter):
-        if len(images.image_sizes) == 0:
+        if hasattr(images, 'image_sizes') and len(images.image_sizes) == 0:
+            logging.error('this should never happen since different workers '
+                    'will have different numbers of iterations.')
             continue
         data_time = time.time() - end
         iteration = iteration + 1
@@ -161,13 +169,20 @@ def do_train(
 
         batch_time = time.time() - end
         end = time.time()
-        meters.update(time=batch_time, data=data_time)
 
-        eta_seconds = meters.time.global_avg * (max_iter - iteration)
-        eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
+        if iteration > start_iter + 5:
+            # we will skip the first few iterations since the time cost
+            # evaluation for those are not good
+            meters.update(time=batch_time, data=data_time)
 
         if iteration % log_step == 0 or iteration == max_iter:
             speed = get_world_size() * log_step * len(targets) / (time.time() - log_start)
+            if hasattr(meters, 'time'):
+                eta_seconds = meters.time.global_avg * (max_iter - iteration)
+                eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
+            else:
+                eta_string = 'Unknown'
+
             logger.info(
                 meters.delimiter.join(
                     [
@@ -189,9 +204,16 @@ def do_train(
             )
             log_start = time.time()
         if iteration % checkpoint_period == 0:
-            checkpointer.save("model_{:07d}".format(iteration), **arguments)
+            # with blobfuse, saving could fail with unknown reason. Instead of
+            # saving and crashing, we do a best-effort manner.
+            try_save_intermediate_snapshot(checkpointer, iteration, arguments)
         if iteration >= max_iter:
             checkpointer.save("model_final", **arguments)
+            if get_rank() > 0:
+                old_value = checkpointer.save_to_disk
+                checkpointer.save_to_disk = True
+                checkpointer.save("model_final_{}".format(get_rank()), **arguments)
+                checkpointer.save_to_disk = old_value
 
     total_training_time = time.time() - start_training_time
     total_time_str = str(datetime.timedelta(seconds=total_training_time))
