@@ -124,6 +124,15 @@ class PostProcessor(nn.Module):
         boxlist.add_field("scores", scores)
         return boxlist
 
+    def prepare_empty_boxlist(self, boxlist):
+        device = boxlist.bbox.device
+        boxlist_empty = BoxList(torch.zeros((0,4)).to(device), boxlist.size,
+                mode='xyxy')
+        boxlist_empty.add_field("scores", torch.Tensor([]).to(device))
+        boxlist_empty.add_field("labels", torch.full((0,), -1,
+                dtype=torch.int64, device=device))
+        return boxlist_empty
+
     def filter_results(self, boxlist, num_classes):
         """Returns bounding-box detection results by thresholding on scores and
         applying non-maximum suppression (NMS).
@@ -161,8 +170,11 @@ class PostProcessor(nn.Module):
                 "labels", torch.full((num_labels,), j, dtype=torch.int64, device=device)
             )
             result.append(boxlist_for_class)
+        if len(result) > 0:
+            result = cat_boxlist(result)
+        else:
+            return self.prepare_empty_boxlist(boxlist)
 
-        result = cat_boxlist(result)
         number_of_detections = len(result)
 
         # Limit to max_per_image detections **over all classes**
