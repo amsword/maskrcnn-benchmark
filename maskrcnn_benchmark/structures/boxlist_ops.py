@@ -5,7 +5,7 @@ from .bounding_box import BoxList
 
 from maskrcnn_benchmark.layers import nms as _box_nms
 
-def boxlist_softnms(boxlist, sigma):
+def boxlist_softnms(boxlist, sigma, threshold=0.):
     # need to improve from the speed side
     if len(boxlist) == 0:
         return boxlist
@@ -16,7 +16,8 @@ def boxlist_softnms(boxlist, sigma):
     rects = [{'rect': list(map(float, b)), 'conf': float(s)} for b, s in zip(boxlist.bbox,
             boxlist.get_field('scores'))]
     from qd.qd_common import softnms_c
-    rects = softnms_c(rects, sigma=sigma, method=2)
+    rects = softnms_c(rects, sigma=sigma, method=2,
+            threshold=threshold)
     bbox = torch.tensor([r['rect'] for r in rects])
     scores = torch.tensor([r['conf'] for r in rects])
     result = BoxList(bbox, boxlist.size)

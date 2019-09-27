@@ -8,13 +8,14 @@ from maskrcnn_benchmark.structures.bounding_box import BoxList
 from maskrcnn_benchmark.structures.boxlist_ops import cat_boxlist
 from maskrcnn_benchmark.modeling.box_coder import BoxCoder
 
-def create_nms_func(nms_policy):
+def create_nms_func(nms_policy, score_thresh=0.):
     if nms_policy.TYPE == 'nms':
         from maskrcnn_benchmark.structures.boxlist_ops import boxlist_nms
         return lambda x: boxlist_nms(x, nms_policy.THRESH)
     elif nms_policy.TYPE == 'softnms':
         from maskrcnn_benchmark.structures.boxlist_ops import boxlist_softnms
-        return lambda x: boxlist_softnms(x, nms_policy.THRESH)
+        return lambda x: boxlist_softnms(x, nms_policy.THRESH,
+                threshold=score_thresh)
 
 class PostProcessor(nn.Module):
     """
@@ -48,7 +49,7 @@ class PostProcessor(nn.Module):
                 logging.info('apply {} rather than standard nms'.format(nms_policy.TYPE))
             elif nms_policy.THRESH != self.nms:
                 logging.info('nms threshold = {}'.format(nms_policy.THRESH))
-        self.nms_func = create_nms_func(nms_policy)
+        self.nms_func = create_nms_func(nms_policy, score_thresh)
         self.detections_per_img = detections_per_img
         if box_coder is None:
             box_coder = BoxCoder(weights=(10., 10., 5., 5.))
@@ -101,7 +102,8 @@ class PostProcessor(nn.Module):
         ):
             boxlist = self.prepare_boxlist(boxes_per_img, prob, image_shape)
             boxlist = boxlist.clip_to_image(remove_empty=False)
-            boxlist = self.filter_results(boxlist, num_classes)
+            #boxlist = self.filter_results(boxlist, num_classes)
+            boxlist = self.filter_results_parallel(boxlist, num_classes)
             results.append(boxlist)
         return results
 
@@ -132,6 +134,73 @@ class PostProcessor(nn.Module):
         boxlist_empty.add_field("labels", torch.full((0,), -1,
                 dtype=torch.int64, device=device))
         return boxlist_empty
+
+    def filter_results_parallel(self, boxlist, num_classes):
+        """Returns bounding-box detection results by thresholding on scores and
+        applying non-maximum suppression (NMS).
+        """
+        # unwrap the boxlist to avoid additional overhead.
+        # if we had multi-class NMS, we could perform this directly on the boxlist
+
+        # cpu version is faster than gpu. revert it to gpu only by verifying
+
+        boxlist = boxlist.to('cpu')
+
+        boxes = boxlist.bbox.reshape(-1, num_classes * 4)
+        scores = boxlist.get_field("scores").reshape(-1, num_classes)
+
+        device = scores.device
+        result = []
+        # Apply threshold on detection probabilities and apply NMS
+        # Skip j = 0, because it's the background class
+        inds_all = scores > self.score_thresh
+        if self.classification_activate == 'softmax':
+            cls_start_idx = 1
+        else:
+            assert self.classification_activate == 'sigmoid'
+            cls_start_idx = 0
+        all_cls_boxlist_for_class = []
+        for j in range(cls_start_idx, num_classes):
+            inds = inds_all[:, j].nonzero().squeeze(1)
+            if len(inds) == 0:
+                continue
+            scores_j = scores[inds, j]
+            boxes_j = boxes[inds, j * 4 : (j + 1) * 4]
+            boxlist_for_class = BoxList(boxes_j, boxlist.size, mode="xyxy")
+            boxlist_for_class.add_field("scores", scores_j)
+            all_cls_boxlist_for_class.append((j, boxlist_for_class))
+
+        all_boxlist_for_class = [boxlist_for_class for _, boxlist_for_class in
+            all_cls_boxlist_for_class]
+        from qd.qd_common import parallel_map
+
+        all_boxlist_for_class = parallel_map(self.nms_func, all_boxlist_for_class)
+
+        for i, boxlist_for_class in enumerate(all_boxlist_for_class):
+            j = all_cls_boxlist_for_class[i][0]
+            num_labels = len(boxlist_for_class)
+            boxlist_for_class.add_field(
+                "labels", torch.full((num_labels,), j, dtype=torch.int64, device=device)
+            )
+            result.append(boxlist_for_class)
+
+        if len(result) > 0:
+            result = cat_boxlist(result)
+        else:
+            return self.prepare_empty_boxlist(boxlist)
+
+        number_of_detections = len(result)
+
+        # Limit to max_per_image detections **over all classes**
+        if number_of_detections > self.detections_per_img > 0:
+            cls_scores = result.get_field("scores")
+            image_thresh, _ = torch.kthvalue(
+                cls_scores.cpu(), number_of_detections - self.detections_per_img + 1
+            )
+            keep = cls_scores >= image_thresh.item()
+            keep = torch.nonzero(keep).squeeze(1)
+            result = result[keep]
+        return result
 
     def filter_results(self, boxlist, num_classes):
         """Returns bounding-box detection results by thresholding on scores and
