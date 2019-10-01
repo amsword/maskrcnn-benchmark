@@ -54,13 +54,13 @@ class ResNet(nn.Module):
         super(ResNet, self).__init__()
         layers = [3, 4, 6, 3]
         if cfg.MODEL.BACKBONE.USE_BN:
-            normf = BatchNorm2d
+            self.normf = BatchNorm2d
         else:
-            normf = frozen_batch_norm
+            self.normf = frozen_batch_norm
 
         self.inplanes = 16
         self.conv1 = nn.Conv2d(3, 16, kernel_size=7, stride=2, padding=3, bias=False)
-        self.bn1 = normf(16)
+        self.bn1 = self.normf(16)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = self._make_layer(block, 16, 1)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
@@ -76,14 +76,14 @@ class ResNet(nn.Module):
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
                 conv1x1(self.inplanes, planes * block.expansion, stride),
-                frozen_batch_norm(planes * block.expansion),
+                self.normf(planes * block.expansion),
             )
 
         layers = []
-        layers.append(block(self.inplanes, planes, stride, downsample))
+        layers.append(block(self.inplanes, planes, stride, downsample, normf=self.normf))
         self.inplanes = planes * block.expansion
         for _ in range(1, blocks):
-            layers.append(block(self.inplanes, planes))
+            layers.append(block(self.inplanes, planes, normf=self.normf))
 
         return nn.Sequential(*layers)
 

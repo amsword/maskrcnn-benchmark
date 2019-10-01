@@ -7,7 +7,6 @@ from torch.nn.modules.utils import _pair
 
 from maskrcnn_benchmark import _C
 
-from apex import amp
 
 class _ROIAlign(Function):
     @staticmethod
@@ -50,12 +49,16 @@ roi_align = _ROIAlign.apply
 class ROIAlign(nn.Module):
     def __init__(self, output_size, spatial_scale, sampling_ratio):
         super(ROIAlign, self).__init__()
-        self.output_size = output_size
+        self.output_size = _pair(output_size)
         self.spatial_scale = spatial_scale
         self.sampling_ratio = sampling_ratio
 
-    @amp.float_function
     def forward(self, input, rois):
+        if torch._C._get_tracing_state():
+            return torch.ops.roi_ops.roi_align_forward(
+                input, rois, self.spatial_scale, self.output_size[0],
+                self.output_size[1], self.sampling_ratio)
+
         return roi_align(
             input, rois, self.output_size, self.spatial_scale, self.sampling_ratio
         )
