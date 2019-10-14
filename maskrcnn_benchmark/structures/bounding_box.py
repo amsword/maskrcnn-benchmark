@@ -219,10 +219,19 @@ class BoxList(object):
         TO_REMOVE = 1
         # we do not use clamp_ inplace for the benefit of JIT tracing
         # WORK AROUND: currently the shape is always [N, 4], that means selecting 0,1 is the same as 0::2
-        xs = self.bbox.index_select(1, torch.tensor([0, 2], dtype=torch.int64, device=self.bbox.device))\
-                 .clamp(min=0, max=self.size[0] - TO_REMOVE)
-        ys = self.bbox.index_select(1, torch.tensor([1, 3], dtype=torch.int64, device=self.bbox.device))\
-                 .clamp(min=0, max=self.size[1] - TO_REMOVE)
+        # WORK AROUND: clamp in opset9 clamps to constants, but in opset11 can be used instead of torch.max
+        if torch._C._get_tracing_state():
+            xs = self.bbox.index_select(1, torch.tensor([0, 2], dtype=torch.int64, device=self.bbox.device)) \
+                .clamp(min=0)
+            xs = torch.min(xs, self.size[0] - TO_REMOVE)
+            ys = self.bbox.index_select(1, torch.tensor([1, 3], dtype=torch.int64, device=self.bbox.device)) \
+                .clamp(min=0)
+            ys = torch.min(ys, self.size[1] - TO_REMOVE)
+        else:
+            xs = self.bbox.index_select(1, torch.tensor([0, 2], dtype=torch.int64, device=self.bbox.device))\
+                     .clamp(min=0, max=self.size[0] - TO_REMOVE)
+            ys = self.bbox.index_select(1, torch.tensor([1, 3], dtype=torch.int64, device=self.bbox.device))\
+                     .clamp(min=0, max=self.size[1] - TO_REMOVE)
         self.bbox = torch.stack([xs, ys], dim=2).view(-1, 4)
         if remove_empty:
             box = self.bbox

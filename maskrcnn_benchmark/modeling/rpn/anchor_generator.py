@@ -136,7 +136,10 @@ class AnchorGenerator(nn.Module):
                     anchors_in_image.append(boxlist)
                 anchors.append(anchors_in_image)
         else:
-            image_height, image_width = [int(x) for x in image_list.size()[-2:]]
+            image_height, image_width = image_list.shape[-2:]
+            if not isinstance(image_height, torch.Tensor):
+                image_height, image_width = torch.tensor(image_height), torch.tensor(image_width)
+            image_height, image_width = image_height.float(), image_width.float()
             anchors_in_image = []
             for anchors_per_feature_map in anchors_over_all_feature_maps:
                 boxlist = BoxList(
