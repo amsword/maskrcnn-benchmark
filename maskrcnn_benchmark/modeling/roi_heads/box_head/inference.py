@@ -80,21 +80,31 @@ class PostProcessor(nn.Module):
 
         # TODO think about a representation of batch of boxes
         image_shapes = [box.size for box in boxes]
-        boxes_per_image = [len(box) for box in boxes]
         concat_boxes = torch.cat([a.bbox for a in boxes], dim=0)
 
         if self.cls_agnostic_bbox_reg:
             box_regression = box_regression[:, -4:]
-        proposals = self.box_coder.decode(
-            box_regression.view(sum(boxes_per_image), -1), concat_boxes
-        )
+        boxes_per_image = None
+        if torch._C._get_tracing_state():
+            proposals = self.box_coder.decode(
+                box_regression, concat_boxes  # NOTE: this is valid only for batch size = 1
+            )
+        else:
+            boxes_per_image = [len(box) for box in boxes]
+            proposals = self.box_coder.decode(
+                box_regression.view(sum(boxes_per_image), -1), concat_boxes
+            )
         if self.cls_agnostic_bbox_reg:
             proposals = proposals.repeat(1, class_prob.shape[1])
 
         num_classes = class_prob.shape[1]
 
-        proposals = proposals.split(boxes_per_image, dim=0)
-        class_prob = class_prob.split(boxes_per_image, dim=0)
+        if torch._C._get_tracing_state():
+            proposals = proposals.unsqueeze(0)
+            class_prob = class_prob.unsqueeze(0)
+        else:
+            proposals = proposals.split(boxes_per_image, dim=0)
+            class_prob = class_prob.split(boxes_per_image, dim=0)
 
         results = []
         for prob, boxes_per_img, image_shape in zip(
@@ -102,8 +112,10 @@ class PostProcessor(nn.Module):
         ):
             boxlist = self.prepare_boxlist(boxes_per_img, prob, image_shape)
             boxlist = boxlist.clip_to_image(remove_empty=False)
-            #boxlist = self.filter_results(boxlist, num_classes)
-            boxlist = self.filter_results_parallel(boxlist, num_classes)
+            if torch._C._get_tracing_state():
+                boxlist = self.filter_results(boxlist, num_classes)
+            else:
+                boxlist = self.filter_results_parallel(boxlist, num_classes)
             results.append(boxlist)
         return results
 
@@ -227,18 +239,24 @@ class PostProcessor(nn.Module):
             cls_start_idx = 0
         for j in range(cls_start_idx, num_classes):
             inds = inds_all[:, j].nonzero().squeeze(1)
-            if len(inds) == 0:
+            if not torch._C._get_tracing_state() and len(inds) == 0:
                 continue
-            scores_j = scores[inds, j]
-            boxes_j = boxes[inds, j * 4 : (j + 1) * 4]
+            # WORK AROUND: replace tensor indexing with index_select
+            # scores_j = scores[inds, j]
+            # boxes_j = boxes[inds, j * 4:(j + 1) * 4]
+            scores_j = scores.index_select(0, inds).select(1, j)
+            boxes_j = boxes.index_select(0, inds)[:, j * 4:(j + 1) * 4]
             boxlist_for_class = BoxList(boxes_j, boxlist.size, mode="xyxy")
             boxlist_for_class.add_field("scores", scores_j)
             boxlist_for_class = self.nms_func(boxlist_for_class)
-            num_labels = len(boxlist_for_class)
             boxlist_for_class.add_field(
-                "labels", torch.full((num_labels,), j, dtype=torch.int64, device=device)
-            )
+                # we use full_like to allow tracing with flexible shape
+                "labels", torch.full_like(boxlist_for_class.bbox[:, 0], j, dtype=torch.int64))
             result.append(boxlist_for_class)
+
+        if torch._C._get_tracing_state():
+            return cat_boxlist(result)
+
         if len(result) > 0:
             result = cat_boxlist(result)
         else:

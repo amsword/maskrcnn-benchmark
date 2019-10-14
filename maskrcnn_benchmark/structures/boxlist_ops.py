@@ -59,7 +59,20 @@ def remove_small_boxes(boxlist, min_size):
     """
     # TODO maybe add an API for querying the ws / hs
     xywh_boxes = boxlist.convert("xywh").bbox
-    _, _, ws, hs = xywh_boxes.unbind(dim=1)
+    # WORK AROUND: work around unbind using split + squeeze.
+    _, _, ws, hs = xywh_boxes.split(1, dim=1)
+    ws = ws.squeeze(1)
+    hs = hs.squeeze(1)
+
+    # If you encountered an error message happened at the following line.
+    # RuntimeError: copy_if failed to synchronize: device-side assert triggered
+    # It is likely that the ws and hs are not finite. 
+    # You can add assert check like the following to debug:
+    # assert not torch.isinf(ws).any() and not torch.isnan(ws).any()
+    # assert not torch.isinf(hs).any() and not torch.isnan(hs).any()
+    # We do not add this check in training to avoid increasing overhead.
+    # To overcome this issue, you can reduce the LR or use gradient clipping.
+
     keep = (
         (ws >= min_size) & (hs >= min_size)
     ).nonzero().squeeze(1)

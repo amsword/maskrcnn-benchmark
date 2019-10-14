@@ -18,7 +18,10 @@ class BoxList(object):
 
     def __init__(self, bbox, image_size, mode="xyxy"):
         device = bbox.device if isinstance(bbox, torch.Tensor) else torch.device("cpu")
-        bbox = torch.as_tensor(bbox, dtype=torch.float32, device=device)
+        # only do as_tensor if isn't a "no-op", because it hurts JIT tracing
+        if (not isinstance(bbox, torch.Tensor) 
+                or bbox.dtype != torch.float32 or bbox.device != device):
+            bbox = torch.as_tensor(bbox, dtype=torch.float32, device=device)
         if bbox.ndimension() != 2:
             raise ValueError(
                 "bbox should have 2 dimensions, got {}".format(bbox.ndimension())
@@ -65,8 +68,9 @@ class BoxList(object):
             bbox = BoxList(bbox, self.size, mode=mode)
         else:
             TO_REMOVE = 1
+            # NOTE: explicitly specify dim to avoid tracing error in GPU
             bbox = torch.cat(
-                (xmin, ymin, xmax - xmin + TO_REMOVE, ymax - ymin + TO_REMOVE), dim=-1
+                (xmin, ymin, xmax - xmin + TO_REMOVE, ymax - ymin + TO_REMOVE), dim=1
             )
             bbox = BoxList(bbox, self.size, mode=mode)
         bbox._copy_extra_fields(self)
@@ -213,10 +217,22 @@ class BoxList(object):
 
     def clip_to_image(self, remove_empty=True):
         TO_REMOVE = 1
-        self.bbox[:, 0].clamp_(min=0, max=self.size[0] - TO_REMOVE)
-        self.bbox[:, 1].clamp_(min=0, max=self.size[1] - TO_REMOVE)
-        self.bbox[:, 2].clamp_(min=0, max=self.size[0] - TO_REMOVE)
-        self.bbox[:, 3].clamp_(min=0, max=self.size[1] - TO_REMOVE)
+        # we do not use clamp_ inplace for the benefit of JIT tracing
+        # WORK AROUND: currently the shape is always [N, 4], that means selecting 0,1 is the same as 0::2
+        # WORK AROUND: clamp in opset9 clamps to constants, but in opset11 can be used instead of torch.max
+        if torch._C._get_tracing_state():
+            xs = self.bbox.index_select(1, torch.tensor([0, 2], dtype=torch.int64, device=self.bbox.device)) \
+                .clamp(min=0)
+            xs = torch.min(xs, self.size[0] - TO_REMOVE)
+            ys = self.bbox.index_select(1, torch.tensor([1, 3], dtype=torch.int64, device=self.bbox.device)) \
+                .clamp(min=0)
+            ys = torch.min(ys, self.size[1] - TO_REMOVE)
+        else:
+            xs = self.bbox.index_select(1, torch.tensor([0, 2], dtype=torch.int64, device=self.bbox.device))\
+                     .clamp(min=0, max=self.size[0] - TO_REMOVE)
+            ys = self.bbox.index_select(1, torch.tensor([1, 3], dtype=torch.int64, device=self.bbox.device))\
+                     .clamp(min=0, max=self.size[1] - TO_REMOVE)
+        self.bbox = torch.stack([xs, ys], dim=2).view(-1, 4)
         if remove_empty:
             box = self.bbox
             keep = (box[:, 3] > box[:, 1]) & (box[:, 2] > box[:, 0])
@@ -233,7 +249,29 @@ class BoxList(object):
         else:
             raise RuntimeError("Should not be here")
 
+        # cannot have negative area values
+        area = torch.max(area, torch.as_tensor(0.0).float())
         return area
+
+    def height(self):
+        box = self.bbox
+        if self.mode == "xyxy":
+            height = box[:, 3] - box[:, 1] + 1
+        elif self.mode == "xywh":
+            height = box[:, 3]
+        else:
+            raise RuntimeError("Unknown box mode")
+        return height
+
+    def width(self):
+        box = self.bbox
+        if self.mode == "xyxy":
+            width = box[:, 2] - box[:, 0] + 1
+        elif self.mode == "xywh":
+            width = box[:, 2]
+        else:
+            raise RuntimeError("Unknown box mode")
+        return width
 
     def copy_with_fields(self, fields, skip_missing=False):
         bbox = BoxList(self.bbox, self.size, self.mode)

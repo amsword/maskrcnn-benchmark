@@ -3,7 +3,7 @@ __pycache__
 _ext
 *.pyc
 *.so
-maskrcnn_benchmark.egg-info/
+*.egg-info/
 build/
 dist/
 
@@ -21,6 +21,9 @@ dist/
 *.swo
 *.swp
 *~
+
+# generated
+cpu_soft_nms.c
 
 # Pycharm editor settings
 .idea
