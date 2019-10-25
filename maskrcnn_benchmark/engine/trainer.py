@@ -123,6 +123,7 @@ def do_train(
     log_step=20,
     data_partition=1,
     explicit_average_grad=False,
+    set_model_to_train=True,
 ):
     logger = logging.getLogger("maskrcnn_benchmark.trainer")
     logger.info("Start training")
@@ -131,7 +132,8 @@ def do_train(
     start_iter = arguments["iteration"]
     # Set model to train before freezing parameters, because BN needs to be
     # eval mode
-    #model.train()
+    if set_model_to_train:
+        model.train()
     start_training_time = time.time()
     end = time.time()
     log_start = time.time()
