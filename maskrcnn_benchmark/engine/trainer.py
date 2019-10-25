@@ -129,7 +129,9 @@ def do_train(
     meters = MetricLogger(delimiter="  ")
     max_iter = len(data_loader)
     start_iter = arguments["iteration"]
-    model.train()
+    # Set model to train before freezing parameters, because BN needs to be
+    # eval mode
+    #model.train()
     start_training_time = time.time()
     end = time.time()
     log_start = time.time()
