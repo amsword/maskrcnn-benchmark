@@ -46,6 +46,7 @@ def build_resnet_fpn_backbone_fast(cfg):
     return model
 
 
+@registry.BACKBONES.register("R-18-FPN")
 @registry.BACKBONES.register("R-50-FPN")
 @registry.BACKBONES.register("R-101-FPN")
 @registry.BACKBONES.register("R-152-FPN")
