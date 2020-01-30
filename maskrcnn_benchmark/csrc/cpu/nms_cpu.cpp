@@ -66,9 +66,9 @@ at::Tensor nms_cpu_kernel(const at::Tensor& dets,
 
 at::Tensor nms_cpu(const at::Tensor& dets,
                const at::Tensor& scores,
-               const double threshold) {
+               const float threshold) {
   at::Tensor result;
-  AT_DISPATCH_FLOATING_TYPES(dets.scalar_type(), "nms", [&] {
+  AT_DISPATCH_FLOATING_TYPES(dets.type(), "nms", [&] {
     result = nms_cpu_kernel<scalar_t>(dets, scores, threshold);
   });
   return result;

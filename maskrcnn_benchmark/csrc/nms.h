@@ -9,7 +9,7 @@
 
 at::Tensor nms(const at::Tensor& dets,
                const at::Tensor& scores,
-               const double threshold) {
+               const float threshold) {
 
   if (dets.type().is_cuda()) {
 #ifdef WITH_CUDA

@@ -6,7 +6,6 @@ import torch
 from torch import nn
 
 from maskrcnn_benchmark.structures.bounding_box import BoxList
-from maskrcnn_benchmark.structures.image_list import ImageList
 
 
 class BufferList(nn.Module):
@@ -78,24 +77,13 @@ class AnchorGenerator(nn.Module):
         ):
             grid_height, grid_width = size
             device = base_anchors.device
-            # WORK AROUND: tracer will create constant for torch.arange(), thus the size is fixed.
-            #              this workaround will have dynamic size for different grid size at runtime.
-            # shifts_x = torch.arange(
-            #     0, grid_width * stride, step=stride, dtype=torch.float32, device=device
-            # )
-            # shifts_y = torch.arange(
-            #     0, grid_height * stride, step=stride, dtype=torch.float32, device=device
-            # )
-            shifts_x = torch.ones(grid_width * stride).nonzero().view(grid_width, stride)\
-                .index_select(1, torch.zeros(1, dtype=torch.long)).to(torch.float32).to(device)
-            shifts_y = torch.ones(grid_height * stride).nonzero().view(grid_height, stride)\
-                .index_select(1, torch.zeros(1, dtype=torch.long)).to(torch.float32).to(device)
-
-            # shift_y, shift_x = torch.meshgrid(shifts_y, shifts_x)
-            # WORK AROUND: no meshgrid export
-            shift_y = shifts_y.view(-1, 1).expand(grid_height, grid_width)
-            shift_x = shifts_x.view(1, -1).expand(grid_height, grid_width)
-
+            shifts_x = torch.arange(
+                0, grid_width * stride, step=stride, dtype=torch.float32, device=device
+            )
+            shifts_y = torch.arange(
+                0, grid_height * stride, step=stride, dtype=torch.float32, device=device
+            )
+            shift_y, shift_x = torch.meshgrid(shifts_y, shifts_x)
             shift_x = shift_x.reshape(-1)
             shift_y = shift_y.reshape(-1)
             shifts = torch.stack((shift_x, shift_y, shift_x, shift_y), dim=1)
@@ -125,21 +113,7 @@ class AnchorGenerator(nn.Module):
         grid_sizes = [feature_map.shape[-2:] for feature_map in feature_maps]
         anchors_over_all_feature_maps = self.grid_anchors(grid_sizes)
         anchors = []
-        if isinstance(image_list, ImageList):
-            for i, (image_height, image_width) in enumerate(image_list.image_sizes):
-                anchors_in_image = []
-                for anchors_per_feature_map in anchors_over_all_feature_maps:
-                    boxlist = BoxList(
-                        anchors_per_feature_map, (image_width, image_height), mode="xyxy"
-                    )
-                    self.add_visibility_to(boxlist)
-                    anchors_in_image.append(boxlist)
-                anchors.append(anchors_in_image)
-        else:
-            image_height, image_width = image_list.shape[-2:]
-            if not isinstance(image_height, torch.Tensor):
-                image_height, image_width = torch.tensor(image_height), torch.tensor(image_width)
-            image_height, image_width = image_height.float(), image_width.float()
+        for i, (image_height, image_width) in enumerate(image_list.image_sizes):
             anchors_in_image = []
             for anchors_per_feature_map in anchors_over_all_feature_maps:
                 boxlist = BoxList(

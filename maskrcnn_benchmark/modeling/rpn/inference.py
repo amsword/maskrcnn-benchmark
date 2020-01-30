@@ -91,35 +91,15 @@ class RPNPostProcessor(torch.nn.Module):
 
         num_anchors = A * H * W
 
-        if not isinstance(num_anchors, torch.Tensor):
-            num_anchors = torch.tensor(num_anchors)
-
-        # WORK AROUND: Remove .float and .long once ORT supports ReduceMin on ints
-        pre_nms_top_n = torch.min(
-            torch.stack(
-                [torch.tensor(self.pre_nms_top_n, dtype=torch.long),
-                 num_anchors]).float()
-        ).long()
-
-        #pre_nms_top_n = min(self.pre_nms_top_n, num_anchors)
+        pre_nms_top_n = min(self.pre_nms_top_n, num_anchors)
         objectness, topk_idx = objectness.topk(pre_nms_top_n, dim=1, sorted=True)
 
-        if torch._C._get_tracing_state():
-            # WORK AROUND: replace tensor indexing with gather. Assuming batch size is 1.
-            assert N == 1, 'Work around replacing tensor indexing with gather for topk idx only works when batch size is 1.'
-            topk_idx = topk_idx.reshape(-1)
-            box_regression = box_regression.index_select(1, topk_idx)
-            batch_idx = None
-        else:
-            batch_idx = torch.arange(N, device=device)[:, None]
-            box_regression = box_regression[batch_idx, topk_idx]
+        batch_idx = torch.arange(N, device=device)[:, None]
+        box_regression = box_regression[batch_idx, topk_idx]
 
         image_shapes = [box.size for box in anchors]
         concat_anchors = torch.cat([a.bbox for a in anchors], dim=0)
-        if batch_idx is None:
-            concat_anchors = concat_anchors.reshape(N, -1, 4).index_select(1, topk_idx)
-        else:
-            concat_anchors = concat_anchors.reshape(N, -1, 4)[batch_idx, topk_idx]
+        concat_anchors = concat_anchors.reshape(N, -1, 4)[batch_idx, topk_idx]
 
         proposals = self.box_coder.decode(
             box_regression.view(-1, 4), concat_anchors.view(-1, 4)
@@ -193,19 +173,7 @@ class RPNPostProcessor(torch.nn.Module):
         else:
             for i in range(num_images):
                 objectness = boxlists[i].get_field("objectness")
-
-                objectness_len = objectness.shape[0]
-                if not isinstance(objectness_len, torch.Tensor):
-                    objectness_len = torch.tensor(objectness_len)
-
-                # WORK AROUND: Remove .float and .long once ORT supports ReduceMin on ints
-                post_nms_top_n = torch.min(
-                    torch.stack(
-                        [torch.tensor(self.fpn_post_nms_top_n, dtype=torch.long),
-                         objectness_len]).float()
-                ).long()
-
-                # post_nms_top_n = min(self.fpn_post_nms_top_n, len(objectness))
+                post_nms_top_n = min(self.fpn_post_nms_top_n, len(objectness))
                 _, inds_sorted = torch.topk(
                     objectness, post_nms_top_n, dim=0, sorted=True
                 )

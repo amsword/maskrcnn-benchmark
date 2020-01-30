@@ -2,12 +2,6 @@
 import math
 
 import torch
-import torch.jit
-
-
-@torch.jit.script
-def view_as(x, y):
-    return x.view(y.shape)
 
 
 class BoxCoder(object):
@@ -70,20 +64,14 @@ class BoxCoder(object):
         TO_REMOVE = 1  # TODO remove
         widths = boxes[:, 2] - boxes[:, 0] + TO_REMOVE
         heights = boxes[:, 3] - boxes[:, 1] + TO_REMOVE
-        # WORK AROUND: 0.5 will be assigned dtype double by default. So explicitly set the tensor type here.
-        ctr_x = boxes[:, 0] + torch.tensor(0.5, dtype=torch.float32) * widths
-        ctr_y = boxes[:, 1] + torch.tensor(0.5, dtype=torch.float32) * heights
+        ctr_x = boxes[:, 0] + 0.5 * widths
+        ctr_y = boxes[:, 1] + 0.5 * heights
 
         wx, wy, ww, wh = self.weights
-        # WORK AROUND: replace slice with dynamic input for now, til onnxruntime implementation is in.
-        tmp_rel_codes = rel_codes.view(rel_codes.shape[0], -1, 4)
-        weight = torch.tensor([wx, wy, ww, wh]).view(1, 1, 4).to(boxes.device)
-        tmp_rel_codes = tmp_rel_codes / weight.expand_as(tmp_rel_codes)
-        dx, dy, dw, dh = torch.split(tmp_rel_codes, 1, 2)
-        dx = dx.squeeze(2)
-        dy = dy.squeeze(2)
-        dw = dw.squeeze(2)
-        dh = dh.squeeze(2)
+        dx = rel_codes[:, 0::4] / wx
+        dy = rel_codes[:, 1::4] / wy
+        dw = rel_codes[:, 2::4] / ww
+        dh = rel_codes[:, 3::4] / wh
 
         # Prevent sending too large values into torch.exp()
         dw = torch.clamp(dw, max=self.bbox_xform_clip)
@@ -94,12 +82,14 @@ class BoxCoder(object):
         pred_w = torch.exp(dw) * widths[:, None]
         pred_h = torch.exp(dh) * heights[:, None]
 
-        pred_boxes = view_as(
-            torch.stack([pred_ctr_x - 0.5 * pred_w,
-                         pred_ctr_y - 0.5 * pred_h,
-                         # x2/y2 (note: "- 1" is correct; don't be fooled by the asymmetry)
-                         pred_ctr_x + 0.5 * pred_w - 1,
-                         pred_ctr_y + 0.5 * pred_h - 1], 2),
-            rel_codes)
+        pred_boxes = torch.zeros_like(rel_codes)
+        # x1
+        pred_boxes[:, 0::4] = pred_ctr_x - 0.5 * pred_w
+        # y1
+        pred_boxes[:, 1::4] = pred_ctr_y - 0.5 * pred_h
+        # x2 (note: "- 1" is correct; don't be fooled by the asymmetry)
+        pred_boxes[:, 2::4] = pred_ctr_x + 0.5 * pred_w - 1
+        # y2 (note: "- 1" is correct; don't be fooled by the asymmetry)
+        pred_boxes[:, 3::4] = pred_ctr_y + 0.5 * pred_h - 1
 
         return pred_boxes
