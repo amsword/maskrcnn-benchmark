@@ -162,11 +162,15 @@ def _rename_conv_weights_for_deformable_conv_layers(state_dict, cfg):
                 new_key = old_key.replace(
                     "conv2.{}".format(param), "conv2.conv.{}".format(param)
                 )
-                logger.info("pattern: {}, old_key: {}, new_key: {}".format(
-                    pattern, old_key, new_key
-                ))
-                state_dict[new_key] = state_dict[old_key]
-                del state_dict[old_key]
+                if new_key in state_dict:
+                    logging.info('ignore to rename {0} to {1} since {1} '
+                            'exists'.format(old_key, new_key))
+                else:
+                    logging.info("pattern: {}, old_key: {}, new_key: {}".format(
+                        pattern, old_key, new_key
+                    ))
+                    state_dict[new_key] = state_dict[old_key]
+                    del state_dict[old_key]
     return state_dict
 
 
