@@ -14,3 +14,17 @@ at::Tensor ROIAlign_forward_cpu(const at::Tensor& input,
 at::Tensor nms_cpu(const at::Tensor& dets,
                    const at::Tensor& scores,
                    const float threshold);
+
+at::Tensor hnms_cpu(const at::Tensor& dets,
+               const at::Tensor& scores,
+               float w0,
+               float h0,
+               float alpha,
+               float gamma,
+               float bx,
+               float by,
+               bool b_is_relative,
+               bool rerank,
+               float rerank_iou
+               );
+
