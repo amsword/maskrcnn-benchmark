@@ -8,6 +8,7 @@
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("nms", &nms, "non-maximum suppression");
+  m.def("hnms", &hnms, "h non-maximum suppression");
   m.def("roi_align_forward", &ROIAlign_forward, "ROIAlign_forward");
   m.def("roi_align_backward", &ROIAlign_backward, "ROIAlign_backward");
   m.def("roi_pool_forward", &ROIPool_forward, "ROIPool_forward");

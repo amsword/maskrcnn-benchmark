@@ -57,6 +57,19 @@ at::Tensor ROIPool_backward_cuda(const at::Tensor& grad,
 
 at::Tensor nms_cuda(const at::Tensor boxes, float nms_overlap_thresh);
 
+at::Tensor hnms_cuda(const at::Tensor& dets,
+               const at::Tensor& scores,
+               float w0,
+               float h0,
+               float alpha,
+               float gamma,
+               float bx,
+               float by,
+               bool b_is_relative,
+               bool rerank,
+               float rerank_iou
+               );
+
 
 int deform_conv_forward_cuda(at::Tensor input, at::Tensor weight,
                              at::Tensor offset, at::Tensor output,
