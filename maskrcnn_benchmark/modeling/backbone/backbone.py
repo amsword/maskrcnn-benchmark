@@ -26,6 +26,13 @@ def build_resnet_fpn_backbone_fast(cfg):
     body = resnet_fast.ResNet(cfg)
     in_channels_stage2 = 64
     out_channels = cfg.MODEL.RESNETS.BACKBONE_OUT_CHANNELS
+    if len(cfg.MODEL.RPN.ANCHOR_STRIDE) == 4:
+        assert len(cfg.MODEL.RPN.ANCHOR_SIZES) == 4
+        top_blocks = None
+    else:
+        assert len(cfg.MODEL.RPN.ANCHOR_STRIDE) == 5
+        assert len(cfg.MODEL.RPN.ANCHOR_SIZES) == 5
+        top_blocks = fpn_module.LastLevelMaxPool()
     fpn = fpn_module.FPN(
         in_channels_list=[
             in_channels_stage2,
@@ -38,7 +45,12 @@ def build_resnet_fpn_backbone_fast(cfg):
             cfg.MODEL.FPN.USE_BN,
             cfg.MODEL.FPN.USE_GN, cfg.MODEL.FPN.USE_RELU
         ),
-        top_blocks=fpn_module.LastLevelMaxPool(),
+        top_blocks=top_blocks,
+        interpolate_mode=cfg.MODEL.FPN.INTERPOLATE_MODE,
+    )
+    model = nn.Sequential(OrderedDict([("body", body), ("fpn", fpn)]))
+    model.out_channels = out_channels
+    return model
         interpolate_mode=cfg.MODEL.FPN.INTERPOLATE_MODE,
     )
     model = nn.Sequential(OrderedDict([("body", body), ("fpn", fpn)]))
