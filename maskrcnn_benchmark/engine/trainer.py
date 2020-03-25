@@ -131,7 +131,6 @@ def do_train(
     meters = MetricLogger(delimiter="  ")
     max_iter = len(data_loader)
     start_iter = arguments["iteration"]
-    model.train()
     start_training_time = time.time()
     end = time.time()
     log_start = time.time()
@@ -149,7 +148,10 @@ def do_train(
         if not no_update:
             scheduler.step()
 
-        images = images.to(device)
+        if isinstance(images, list):
+            images = [x.to(device )for x in images]
+        else:
+            images = images.to(device)
         if isinstance(targets, torch.Tensor):
             targets = targets.to(device)
         else:
