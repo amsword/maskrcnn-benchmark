@@ -150,7 +150,10 @@ def do_train(
 
         scheduler.step()
 
-        images = images.to(device)
+        if isinstance(images, list):
+            images = [x.to(device )for x in images]
+        else:
+            images = images.to(device)
         if isinstance(targets, torch.Tensor):
             targets = targets.to(device)
         else:
