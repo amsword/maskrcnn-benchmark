@@ -51,11 +51,6 @@ def build_resnet_fpn_backbone_fast(cfg):
     model = nn.Sequential(OrderedDict([("body", body), ("fpn", fpn)]))
     model.out_channels = out_channels
     return model
-        interpolate_mode=cfg.MODEL.FPN.INTERPOLATE_MODE,
-    )
-    model = nn.Sequential(OrderedDict([("body", body), ("fpn", fpn)]))
-    model.out_channels = out_channels
-    return model
 
 
 @registry.BACKBONES.register("R-18-FPN")
