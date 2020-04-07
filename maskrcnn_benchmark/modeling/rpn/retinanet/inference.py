@@ -25,6 +25,7 @@ class RetinaNetPostProcessor(RPNPostProcessor):
         min_size,
         num_classes,
         box_coder=None,
+        nms_policy=None,
     ):
         """
         Arguments:
@@ -37,7 +38,8 @@ class RetinaNetPostProcessor(RPNPostProcessor):
             box_coder (BoxCoder)
         """
         super(RetinaNetPostProcessor, self).__init__(
-            pre_nms_thresh, 0, nms_thresh, min_size
+            pre_nms_thresh, 0, nms_thresh, min_size,
+            nms_policy=nms_policy
         )
         self.pre_nms_thresh = pre_nms_thresh
         self.pre_nms_top_n = pre_nms_top_n
@@ -49,12 +51,25 @@ class RetinaNetPostProcessor(RPNPostProcessor):
         if box_coder is None:
             box_coder = BoxCoder(weights=(10., 10., 5., 5.))
         self.box_coder = box_coder
- 
+
+        from maskrcnn_benchmark.modeling.roi_heads.box_head.inference import create_nms_func
+        self.nms_func = create_nms_func(nms_policy, score_thresh=0.,
+            score_field='scores', max_proposals=-1)
+
     def add_gt_proposals(self, proposals, targets):
         """
         This function is not used in RetinaNet
         """
         pass
+
+    def prepare_empty_boxlist(self, boxlist):
+        device = boxlist.bbox.device
+        boxlist_empty = BoxList(torch.zeros((0,4)).to(device), boxlist.size,
+                mode='xyxy')
+        boxlist_empty.add_field("scores", torch.Tensor([]).to(device))
+        boxlist_empty.add_field("labels", torch.full((0,), -1,
+                dtype=torch.int64, device=device))
+        return boxlist_empty
 
     def forward_for_single_feature_map(
             self, anchors, box_cls, box_regression):
@@ -140,15 +155,13 @@ class RetinaNetPostProcessor(RPNPostProcessor):
             # skip the background
             for j in range(1, self.num_classes):
                 inds = (labels == j).nonzero().view(-1)
-
+                if len(inds) == 0:
+                    continue
                 scores_j = scores[inds]
                 boxes_j = boxes[inds, :].view(-1, 4)
                 boxlist_for_class = BoxList(boxes_j, boxlist.size, mode="xyxy")
                 boxlist_for_class.add_field("scores", scores_j)
-                boxlist_for_class = boxlist_nms(
-                    boxlist_for_class, self.nms_thresh,
-                    score_field="scores"
-                )
+                boxlist_for_class = self.nms_func(boxlist_for_class)
                 num_labels = len(boxlist_for_class)
                 boxlist_for_class.add_field(
                     "labels", torch.full((num_labels,), j,
@@ -156,8 +169,10 @@ class RetinaNetPostProcessor(RPNPostProcessor):
                                          device=scores.device)
                 )
                 result.append(boxlist_for_class)
-
-            result = cat_boxlist(result)
+            if len(result) == 0:
+                result = self.prepare_empty_boxlist(boxlists[i])
+            else:
+                result = cat_boxlist(result)
             number_of_detections = len(result)
 
             # Limit to max_per_image detections **over all classes**
@@ -178,6 +193,7 @@ def make_retinanet_postprocessor(config, rpn_box_coder, is_train):
     pre_nms_thresh = config.MODEL.RETINANET.INFERENCE_TH
     pre_nms_top_n = config.MODEL.RETINANET.PRE_NMS_TOP_N
     nms_thresh = config.MODEL.RETINANET.NMS_TH
+    nms_policy = config.MODEL.RETINANET.NMS_POLICY
     fpn_post_nms_top_n = config.TEST.DETECTIONS_PER_IMG
     min_size = 0
 
@@ -189,6 +205,7 @@ def make_retinanet_postprocessor(config, rpn_box_coder, is_train):
         min_size=min_size,
         num_classes=config.MODEL.RETINANET.NUM_CLASSES,
         box_coder=rpn_box_coder,
+        nms_policy=nms_policy,
     )
 
     return box_selector

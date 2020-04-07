@@ -152,6 +152,7 @@ class DetectronCheckpointer(Checkpointer):
         loaded = super(DetectronCheckpointer, self)._load_file(f)
         if "model" not in loaded:
             loaded = dict(model=loaded)
-        from .c2_model_loading import _rename_conv_weights_for_deformable_conv_layers
-        _rename_conv_weights_for_deformable_conv_layers(loaded['model'], self.cfg)
+        if self.cfg is not None:
+            from .c2_model_loading import _rename_conv_weights_for_deformable_conv_layers
+            _rename_conv_weights_for_deformable_conv_layers(loaded['model'], self.cfg)
         return loaded

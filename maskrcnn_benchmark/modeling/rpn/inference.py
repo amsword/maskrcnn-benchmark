@@ -6,6 +6,7 @@ from maskrcnn_benchmark.structures.bounding_box import BoxList
 from maskrcnn_benchmark.structures.boxlist_ops import cat_boxlist
 from maskrcnn_benchmark.structures.boxlist_ops import boxlist_nms
 from maskrcnn_benchmark.structures.boxlist_ops import remove_small_boxes
+from maskrcnn_benchmark.modeling.roi_heads.box_head.inference import create_nms_func
 
 from ..utils import cat
 from .utils import permute_and_flatten
@@ -25,6 +26,7 @@ class RPNPostProcessor(torch.nn.Module):
         box_coder=None,
         fpn_post_nms_top_n=None,
         fpn_post_nms_per_batch=True,
+        nms_policy=None,
     ):
         """
         Arguments:
@@ -49,6 +51,17 @@ class RPNPostProcessor(torch.nn.Module):
             fpn_post_nms_top_n = post_nms_top_n
         self.fpn_post_nms_top_n = fpn_post_nms_top_n
         self.fpn_post_nms_per_batch = fpn_post_nms_per_batch
+
+        if nms_thresh != nms_policy.THRESH:
+            if nms_policy.TYPE == 'nms':
+                import logging
+                logging.info('num_policy.THRESH changed from {} to {}'.format(
+                    nms_policy.THRESH, nms_thresh))
+                nms_policy.THRESH = nms_thresh
+
+        self.nms_func = create_nms_func(nms_policy,
+                max_proposals=self.post_nms_top_n,
+                score_field='objectness')
 
     def add_gt_proposals(self, proposals, targets):
         """

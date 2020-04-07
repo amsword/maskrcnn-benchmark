@@ -28,7 +28,7 @@ class BoxList(object):
                 "last dimension of bbox should have a "
                 "size of 4, got {}".format(bbox.size(-1))
             )
-        if mode not in ("xyxy", "xywh"):
+        if mode not in ("xyxy", "xywh", 'cxywh'):
             raise ValueError("mode should be 'xyxy' or 'xywh'")
 
         self.bbox = bbox
@@ -53,7 +53,7 @@ class BoxList(object):
             self.extra_fields[k] = v
 
     def convert(self, mode):
-        if mode not in ("xyxy", "xywh"):
+        if mode not in ("xyxy", "xywh", 'cxywh'):
             raise ValueError("mode should be 'xyxy' or 'xywh'")
         if mode == self.mode:
             return self
@@ -63,10 +63,16 @@ class BoxList(object):
         if mode == "xyxy":
             bbox = torch.cat((xmin, ymin, xmax, ymax), dim=-1)
             bbox = BoxList(bbox, self.size, mode=mode)
-        else:
+        elif mode == 'xywh':
             TO_REMOVE = 1
             bbox = torch.cat(
                 (xmin, ymin, xmax - xmin + TO_REMOVE, ymax - ymin + TO_REMOVE), dim=-1
+            )
+            bbox = BoxList(bbox, self.size, mode=mode)
+        elif mode == 'cxywh':
+            TO_REMOVE = 1
+            bbox = torch.cat(
+                ((xmin + xmax + TO_REMOVE) / 2., (ymin + ymax + 1) / 2, xmax - xmin + TO_REMOVE, ymax - ymin + TO_REMOVE), dim=-1
             )
             bbox = BoxList(bbox, self.size, mode=mode)
         bbox._copy_extra_fields(self)
@@ -84,6 +90,15 @@ class BoxList(object):
                 ymin,
                 xmin + (w - TO_REMOVE).clamp(min=0),
                 ymin + (h - TO_REMOVE).clamp(min=0),
+            )
+        elif self.mode == 'cxywh':
+            TO_REMOVE = 1
+            cx, cy, w, h = self.bbox.split(1, dim=-1)
+            return (
+                cx - w / 2.,
+                cy - h / 2.,
+                cx + w / 2. - TO_REMOVE,
+                cy + h / 2. - TO_REMOVE,
             )
         else:
             raise RuntimeError("Should not be here")
@@ -212,16 +227,19 @@ class BoxList(object):
         return self.bbox.shape[0]
 
     def clip_to_image(self, remove_empty=True):
-        TO_REMOVE = 1
-        self.bbox[:, 0].clamp_(min=0, max=self.size[0] - TO_REMOVE)
-        self.bbox[:, 1].clamp_(min=0, max=self.size[1] - TO_REMOVE)
-        self.bbox[:, 2].clamp_(min=0, max=self.size[0] - TO_REMOVE)
-        self.bbox[:, 3].clamp_(min=0, max=self.size[1] - TO_REMOVE)
-        if remove_empty:
-            box = self.bbox
-            keep = (box[:, 3] > box[:, 1]) & (box[:, 2] > box[:, 0])
-            return self[keep]
-        return self
+        if self.mode == 'xyxy':
+            TO_REMOVE = 1
+            self.bbox[:, 0].clamp_(min=0, max=self.size[0] - TO_REMOVE)
+            self.bbox[:, 1].clamp_(min=0, max=self.size[1] - TO_REMOVE)
+            self.bbox[:, 2].clamp_(min=0, max=self.size[0] - TO_REMOVE)
+            self.bbox[:, 3].clamp_(min=0, max=self.size[1] - TO_REMOVE)
+            if remove_empty:
+                box = self.bbox
+                keep = (box[:, 3] > box[:, 1]) & (box[:, 2] > box[:, 0])
+                return self[keep]
+            return self
+        else:
+            raise NotImplementedError
 
     def area(self):
         box = self.bbox
