@@ -136,11 +136,18 @@ def do_train(
     log_start = time.time()
     from qd.qd_common import is_hvd_initialized
     use_hvd = is_hvd_initialized()
+    visualize_input = False
+
     for iteration, (images, targets, _) in enumerate(data_loader, start_iter):
         if hasattr(images, 'image_sizes') and len(images.image_sizes) == 0:
             logging.error('this should never happen since different workers '
                     'will have different numbers of iterations.')
             continue
+
+        if visualize_input:
+            from qd.qd_pytorch import visualize_maskrcnn_input
+            visualize_maskrcnn_input(images, targets, show_box=True)
+
         data_time = time.time() - end
         iteration = iteration + 1
         arguments["iteration"] = iteration
@@ -149,7 +156,7 @@ def do_train(
             scheduler.step()
 
         if isinstance(images, list):
-            images = [x.to(device )for x in images]
+            images = [x.to(device) for x in images]
         else:
             images = images.to(device)
         if isinstance(targets, torch.Tensor):
