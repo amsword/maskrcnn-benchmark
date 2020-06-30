@@ -39,7 +39,6 @@ def get_extensions():
             "-D__CUDA_NO_HALF2_OPERATORS__",
         ]
 
-    sources = [os.path.join(extensions_dir, s) for s in sources]
 
     include_dirs = [extensions_dir]
 
@@ -47,7 +46,7 @@ def get_extensions():
         extension(
             "maskrcnn_benchmark._C",
             sources,
-            include_dirs=include_dirs,
+            include_dirs=[os.path.abspath(d) for d in include_dirs],
             define_macros=define_macros,
             extra_compile_args=extra_compile_args,
         )
