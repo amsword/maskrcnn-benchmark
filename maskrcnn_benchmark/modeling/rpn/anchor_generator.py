@@ -43,26 +43,28 @@ class AnchorGenerator(nn.Module):
         aspect_ratios=(0.5, 1.0, 2.0),
         anchor_strides=(8, 16, 32),
         straddle_thresh=0,
+        cell_anchors=[]
     ):
         super(AnchorGenerator, self).__init__()
 
         if len(anchor_strides) == 1:
+            assert len(cell_anchors) == 0
             anchor_stride = anchor_strides[0]
             cell_anchors = [
                 generate_anchors(anchor_stride, sizes, aspect_ratios).float()
             ]
         else:
-            if len(anchor_strides) != len(sizes):
-                raise RuntimeError("FPN should have #anchor_strides == #sizes")
-
-            cell_anchors = [
-                generate_anchors(
-                    anchor_stride,
-                    size if isinstance(size, (tuple, list)) else (size,),
-                    aspect_ratios
-                ).float()
-                for anchor_stride, size in zip(anchor_strides, sizes)
-            ]
+            if len(cell_anchors) == 0:
+                if len(anchor_strides) != len(sizes):
+                    raise RuntimeError("FPN should have #anchor_strides == #sizes")
+                cell_anchors = [
+                    generate_anchors(
+                        anchor_stride,
+                        size if isinstance(size, (tuple, list)) else (size,),
+                        aspect_ratios
+                    ).float()
+                    for anchor_stride, size in zip(anchor_strides, sizes)
+                ] # a list of 3x4 tensors
         self.strides = anchor_strides
         self.cell_anchors = BufferList(cell_anchors)
         self.straddle_thresh = straddle_thresh

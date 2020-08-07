@@ -4,8 +4,10 @@ import torch
 from .bounding_box import BoxList
 
 from maskrcnn_benchmark.layers import nms as _box_nms
+from maskrcnn_benchmark.layers import nms_max
 
-def boxlist_softnms(boxlist, sigma, threshold=0.):
+def boxlist_softnms(boxlist, sigma, threshold=0.,
+        max_box=1000000000, score_field='scores'):
     # need to improve from the speed side
     if len(boxlist) == 0:
         return boxlist
@@ -14,15 +16,42 @@ def boxlist_softnms(boxlist, sigma, threshold=0.):
     boxlist = boxlist.convert('xyxy')
     assert len(boxlist.fields()) == 1
     rects = [{'rect': list(map(float, b)), 'conf': float(s)} for b, s in zip(boxlist.bbox,
-            boxlist.get_field('scores'))]
+            boxlist.get_field(score_field))]
     from qd.qd_common import softnms_c
     rects = softnms_c(rects, sigma=sigma, method=2,
-            threshold=threshold)
+            threshold=threshold, max_box=max_box)
     bbox = torch.tensor([r['rect'] for r in rects])
     scores = torch.tensor([r['conf'] for r in rects])
     result = BoxList(bbox, boxlist.size)
-    result.add_field('scores', scores)
+    result.add_field(score_field, scores)
     return result.to(device)
+
+def boxlist_nms_no_convert_back(boxlist, nms_thresh, max_proposals=-1, score_field="scores"):
+    """
+    Performs non-maximum suppression on a boxlist, with scores specified
+    in a boxlist field via score_field.
+
+    Arguments:
+        boxlist(BoxList)
+        nms_thresh (float)
+        max_proposals (int): if > 0, then only the top max_proposals are kept
+            after non-maximum suppression
+        score_field (str)
+    """
+    if nms_thresh <= 0:
+        return boxlist
+    boxlist = boxlist.convert("xyxy")
+    boxes = boxlist.bbox
+    score = boxlist.get_field(score_field)
+    #if max_proposals > 0:
+        #keep = nms_max(boxes, score, nms_thresh, max_proposals)
+        #assert len(keep) <= max_proposals
+    #else:
+    keep = _box_nms(boxes, score, nms_thresh)
+    if max_proposals > 0:
+        keep = keep[: max_proposals]
+    boxlist = boxlist[keep]
+    return boxlist
 
 def boxlist_nms(boxlist, nms_thresh, max_proposals=-1, score_field="scores"):
     """

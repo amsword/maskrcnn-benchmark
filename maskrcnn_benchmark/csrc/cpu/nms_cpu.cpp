@@ -9,6 +9,80 @@
 #include <chrono>
 using namespace std::chrono;
 
+template <typename scalar_t>
+at::Tensor nms_cpu_kernel_max(const at::Tensor& dets,
+                          const at::Tensor& scores,
+                          const float threshold,
+                          int max_box) {
+  AT_ASSERTM(!dets.type().is_cuda(), "dets must be a CPU tensor");
+  AT_ASSERTM(!scores.type().is_cuda(), "scores must be a CPU tensor");
+  AT_ASSERTM(dets.type() == scores.type(), "dets should have the same type as scores");
+  AT_ASSERTM(max_box > 0, "max_box should be larger than 0");
+
+  if (dets.numel() == 0) {
+    return at::empty({0}, dets.options().dtype(at::kLong).device(at::kCPU));
+  }
+
+  auto x1_t = dets.select(1, 0).contiguous();
+  auto y1_t = dets.select(1, 1).contiguous();
+  auto x2_t = dets.select(1, 2).contiguous();
+  auto y2_t = dets.select(1, 3).contiguous();
+
+  at::Tensor areas_t = (x2_t - x1_t + 1) * (y2_t - y1_t + 1);
+
+  auto order_t = std::get<1>(scores.sort(0, /* descending=*/true));
+
+  auto ndets = dets.size(0);
+  at::Tensor suppressed_t = at::zeros({ndets}, dets.options().dtype(at::kByte).device(at::kCPU));
+
+  auto suppressed = suppressed_t.data<uint8_t>();
+  auto order = order_t.data<int64_t>();
+  auto x1 = x1_t.data<scalar_t>();
+  auto y1 = y1_t.data<scalar_t>();
+  auto x2 = x2_t.data<scalar_t>();
+  auto y2 = y2_t.data<scalar_t>();
+  auto areas = areas_t.data<scalar_t>();
+
+  for (int64_t _i = 0; _i < ndets; _i++) {
+    auto i = order[_i];
+    if (suppressed[i] == 1)
+      continue;
+    auto ix1 = x1[i];
+    auto iy1 = y1[i];
+    auto ix2 = x2[i];
+    auto iy2 = y2[i];
+    auto iarea = areas[i];
+
+    max_box--;
+    if (max_box <= 0) {
+        for (int64_t _j = _i + 1; _j < ndets; _j++) {
+            auto j = order[_j];
+            suppressed[j] = 1;
+        }
+        break;
+    }
+
+    for (int64_t _j = _i + 1; _j < ndets; _j++) {
+      auto j = order[_j];
+      if (suppressed[j] == 1)
+        continue;
+      auto xx1 = std::max(ix1, x1[j]);
+      auto yy1 = std::max(iy1, y1[j]);
+      auto xx2 = std::min(ix2, x2[j]);
+      auto yy2 = std::min(iy2, y2[j]);
+
+      auto w = std::max(static_cast<scalar_t>(0), xx2 - xx1 + 1);
+      auto h = std::max(static_cast<scalar_t>(0), yy2 - yy1 + 1);
+      auto inter = w * h;
+      auto ovr = inter / (iarea + areas[j] - inter);
+      if (ovr >= threshold) {
+        suppressed[j] = 1;
+      }
+   }
+  }
+  return at::nonzero(suppressed_t == 0).squeeze(1);
+}
+
 
 template <typename scalar_t>
 at::Tensor nms_cpu_kernel(const at::Tensor& dets,
@@ -80,6 +154,71 @@ at::Tensor nms_cpu(const at::Tensor& dets,
     result = nms_cpu_kernel<scalar_t>(dets, scores, threshold);
   });
   return result;
+}
+
+at::Tensor nms_cpu_max(const at::Tensor& dets,
+               const at::Tensor& scores,
+               const float threshold,
+               const int max_box) {
+  at::Tensor result;
+  AT_DISPATCH_FLOATING_TYPES(dets.type(), "nms", [&] {
+    result = nms_cpu_kernel_max<scalar_t>(dets, scores, threshold, max_box);
+  });
+  return result;
+}
+
+at::Tensor hash_rects2(const at::Tensor& dets,
+               float w0,
+               float h0,
+               float alpha,
+               float gamma,
+               float bx,
+               float by,
+               bool b_is_relative) {
+    auto num_box = dets.size(0);
+    auto gamma_ratio = (1. - gamma) / (1. + gamma);
+
+    auto result = at::zeros({long(num_box), 4},
+            dets.options().dtype(at::kLong));
+
+    auto pdets = dets.data<float>();
+    auto presult = result.data<int64_t>();
+    auto log_w0 = log(w0);
+    auto log_h0 = log(h0);
+    auto log_alpha = log(alpha);
+
+    auto w0_gamma = w0 * gamma_ratio;
+    auto h0_gamma = h0 * gamma_ratio;
+
+    for (auto idx_box = 0; idx_box < num_box; idx_box++) {
+        auto curr_det = pdets + idx_box * 4;
+        auto x = curr_det[0];
+        auto y = curr_det[1];
+        auto w = curr_det[2];
+        auto h = curr_det[3];
+
+        auto i = round((log_w0 - log(w)) / log_alpha);
+        auto j = round((log_h0 - log(h)) / log_alpha);
+        auto di = w0_gamma / pow(alpha, i);
+        auto dj = h0_gamma / pow(alpha, j);
+
+        int64_t qx, qy;
+        if (b_is_relative) {
+            qx = round(x / di - bx);
+            qy = round(y / dj - by);
+        } else {
+            qx = round(x / di - bx / di);
+            qy = round(y / dj - by / dj);
+        }
+        auto curr_out  = presult + 4 * idx_box;
+        curr_out[0] = qx;
+        curr_out[1] = qy;
+        curr_out[2] = i;
+        curr_out[3] = j;
+    }
+
+    return result;
+
 }
 
 at::Tensor hash_rects(const at::Tensor& dets,
@@ -281,6 +420,9 @@ at::Tensor hnms_cpu(const at::Tensor& dets,
     }
 
     auto codes = hash_rects(dets, w0, h0, alpha, gamma, bx, by, b_is_relative);
+
+    // teh following implementation is slower
+    //auto codes = hash_rects2(dets, w0, h0, alpha, gamma, bx, by, b_is_relative);
 
     if (!rerank) {
         auto result = get_best_score_each_code(codes, scores);

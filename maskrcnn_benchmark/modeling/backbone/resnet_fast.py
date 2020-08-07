@@ -3,6 +3,7 @@
 import torch.nn as nn
 from torch.nn import BatchNorm2d
 from maskrcnn_benchmark.modeling.make_layers import frozen_batch_norm
+from maskrcnn_benchmark.layers.batch_norm import FrozenBatchNorm2d
 
 def conv3x3(in_planes, out_planes, stride=1):
     """3x3 convolution with padding"""
@@ -63,7 +64,11 @@ class ResNet(nn.Module):
         self.bn1 = normf(16)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = self._make_layer(block, 16, 1)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        if True:
+            self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        else:
+            self.maxpool = nn.Sequential(nn.Conv2d(16, 16, kernel_size=3, stride=2, padding=1, bias=False),
+                nn.ReLU(inplace=True))
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
@@ -117,3 +122,75 @@ class ResNet(nn.Module):
 
         return res
 
+class ResNet_XX(nn.Module):
+    def __init__(self, cfg, block=BasicBlock):
+        super().__init__()
+        layers = cfg.MODEL.RESNETS.LAYERS
+        in_channels = cfg.MODEL.RESNETS.IN_CHANNELS
+        if cfg.MODEL.BACKBONE.USE_BN:
+            self.normf = BatchNorm2d
+        else:
+            self.normf = FrozenBatchNorm2d
+
+        self.inplanes = 16
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=7, stride=2, padding=3, bias=False)
+        self.bn1 = self.normf(16)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = self._make_layer(block, 16, 1)
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.layer1 = self._make_layer(block, in_channels[0], layers[0])
+        self.layer2 = self._make_layer(block, in_channels[1], layers[1], stride=2)
+        self.layer3 = self._make_layer(block, in_channels[2], layers[2], stride=2)
+        self.layer4 = self._make_layer(block, in_channels[3], layers[3], stride=2)
+
+        self._freeze_backbone(cfg.MODEL.BACKBONE.FREEZE_CONV_BODY_AT)
+
+    def _make_layer(self, block, planes, blocks, stride=1):
+        downsample = None
+        if stride != 1 or self.inplanes != planes * block.expansion:
+            downsample = nn.Sequential(
+                conv1x1(self.inplanes, planes * block.expansion, stride),
+                self.normf(planes * block.expansion),
+            )
+
+        layers = []
+        layers.append(block(self.inplanes, planes, stride, downsample, normf=self.normf))
+        self.inplanes = planes * block.expansion
+        for _ in range(1, blocks):
+            layers.append(block(self.inplanes, planes, normf=self.normf))
+
+        return nn.Sequential(*layers)
+
+    def _freeze_backbone(self, freeze_at):
+        if freeze_at < 0:
+            return
+        for stage_index in range(freeze_at):
+            if stage_index == 0:
+                self._no_grad(self.conv1)
+                self._no_grad(self.conv2)
+            else:
+                m = getattr(self, "layer" + str(stage_index))
+                self._no_grad(m)
+
+    def _no_grad(self, m):
+        for p in m.parameters():
+            p.requires_grad = False
+
+    def forward(self, x):
+
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.conv2(x)
+        x = self.maxpool(x)
+        res = []
+        x = self.layer1(x)
+        res.append(x)
+        x = self.layer2(x)
+        res.append(x)
+        x = self.layer3(x)
+        res.append(x)
+        x = self.layer4(x)
+        res.append(x)
+
+        return res

@@ -84,7 +84,8 @@ def _compute_aspect_ratios(dataset):
 
 
 def make_batch_data_sampler(
-    dataset, sampler, aspect_grouping, images_per_batch, num_iters=None, start_iter=0
+    dataset, sampler, aspect_grouping, images_per_batch,
+    num_iters=None, start_iter=0
 ):
     if aspect_grouping:
         if not isinstance(aspect_grouping, (list, tuple)):
@@ -102,8 +103,10 @@ def make_batch_data_sampler(
         batch_sampler = samplers.IterationBasedBatchSampler(
             batch_sampler, num_iters, start_iter
         )
+    from qd.qd_pytorch import AttachIterationNumberBatchSampler
+    batch_sampler = AttachIterationNumberBatchSampler(batch_sampler,
+            start_iter, num_iters)
     return batch_sampler
-
 
 def make_data_loader(cfg, is_train=True, is_distributed=False, start_iter=0):
     num_gpus = get_world_size()
@@ -159,7 +162,8 @@ def make_data_loader(cfg, is_train=True, is_distributed=False, start_iter=0):
         sampler = make_data_sampler(dataset, shuffle, is_distributed,
                 length_divisible=images_per_gpu)
         batch_sampler = make_batch_data_sampler(
-            dataset, sampler, aspect_grouping, images_per_gpu, num_iters, start_iter
+            dataset, sampler, aspect_grouping, images_per_gpu, num_iters,
+            start_iter
         )
         collator = BatchCollator(cfg.DATALOADER.SIZE_DIVISIBILITY)
         num_workers = cfg.DATALOADER.NUM_WORKERS

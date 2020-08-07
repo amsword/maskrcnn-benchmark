@@ -9,18 +9,19 @@ class FrozenBatchNorm2d(nn.Module):
     are fixed
     """
 
-    def __init__(self, n, eps=0):
+    def __init__(self, num_features, eps=0):
         # in pytorch batchnorm layer, eps is 1e-5. We assume the default init
         # weight has merged 1e-5 and thus ignored this. Here, we set it as 0 by
         # default to make it compatible with the original maskrcnn
         # implementation, but it is noting that if the init weight comes from
         # pytorch or torch vision, make sure eps is correctly set.
         super(FrozenBatchNorm2d, self).__init__()
-        self.register_buffer("weight", torch.ones(n))
-        self.register_buffer("bias", torch.zeros(n))
-        self.register_buffer("running_mean", torch.zeros(n))
-        self.register_buffer("running_var", torch.ones(n))
+        self.register_buffer("weight", torch.ones(num_features))
+        self.register_buffer("bias", torch.zeros(num_features))
+        self.register_buffer("running_mean", torch.zeros(num_features))
+        self.register_buffer("running_var", torch.ones(num_features))
         self.eps = eps
+        self.num_features = num_features
 
     def forward(self, x):
         # Cast all fixed parameters to half() if necessary

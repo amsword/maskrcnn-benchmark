@@ -536,6 +536,32 @@ class ConvResStem(nn.Module):
         x = F.max_pool2d(x, kernel_size=3, stride=2, padding=1)
         return x
 
+class BottleneckWithSyncBatchNorm(Bottleneck):
+    def __init__(
+        self,
+        in_channels,
+        bottleneck_channels,
+        out_channels,
+        num_groups=1,
+        stride_in_1x1=True,
+        stride=1,
+        dilation=1,
+        dcn_config={},
+        use_se=False,
+    ):
+        super(BottleneckWithSyncBatchNorm, self).__init__(
+            in_channels=in_channels,
+            bottleneck_channels=bottleneck_channels,
+            out_channels=out_channels,
+            num_groups=num_groups,
+            stride_in_1x1=stride_in_1x1,
+            stride=stride,
+            dilation=dilation,
+            norm_func=frozen_batch_norm,
+            dcn_config=dcn_config,
+            use_se=use_se,
+        )
+
 class BottleneckWithFixedBatchNorm(Bottleneck):
     def __init__(
         self,

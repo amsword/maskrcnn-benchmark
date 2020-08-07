@@ -51,12 +51,49 @@ def build_resnet_fpn_backbone_fast(cfg):
     model = nn.Sequential(OrderedDict([("body", body), ("fpn", fpn)]))
     model.out_channels = out_channels
     return model
+
+@registry.BACKBONES.register('General-FPN')
+def build_shufflenet_fpn_backbone(cfg):
+    from qd.qd_common import load_from_yaml_str
+    param = cfg.MODEL.BACKBONE.CONV_BODY_PARAM
+    param = load_from_yaml_str(param)
+
+    from qd.qd_common import execute_func
+    body = execute_func(param)
+
+    out_channels = cfg.MODEL.RESNETS.BACKBONE_OUT_CHANNELS
+    fpn = fpn_module.FPN(
+        in_channels_list=body.get_out_channels(),
+        out_channels=out_channels,
+        conv_block=conv_with_kaiming_uniform(
+            cfg.MODEL.FPN.USE_BN,
+            cfg.MODEL.FPN.USE_GN,
+            cfg.MODEL.FPN.USE_RELU
+        ),
+        top_blocks=fpn_module.LastLevelMaxPool(),
         interpolate_mode=cfg.MODEL.FPN.INTERPOLATE_MODE,
     )
     model = nn.Sequential(OrderedDict([("body", body), ("fpn", fpn)]))
     model.out_channels = out_channels
     return model
 
+@registry.BACKBONES.register("R-XX-FPN-Fast")
+def build_resnet_XX_fpn_backbone_fast(cfg):
+    # more flexible backbone structure
+    body = resnet_fast.ResNet_XX(cfg)
+    in_channels = cfg.MODEL.RESNETS.IN_CHANNELS
+    out_channels = cfg.MODEL.RESNETS.BACKBONE_OUT_CHANNELS
+    fpn = fpn_module.FPN(
+        in_channels_list=in_channels,
+        out_channels=out_channels,
+        conv_block=conv_with_kaiming_uniform(
+            cfg.MODEL.FPN.USE_GN, cfg.MODEL.FPN.USE_RELU
+        ),
+        top_blocks=fpn_module.LastLevelMaxPool(),
+    )
+    model = nn.Sequential(OrderedDict([("body", body), ("fpn", fpn)]))
+    model.out_channels = out_channels
+    return model
 
 @registry.BACKBONES.register("R-18-FPN")
 @registry.BACKBONES.register("R-50-FPN")
@@ -118,6 +155,17 @@ def build_efficientdet0_backbone(cfg):
     import qd.layers.efficient_det as efficient_det
     efficient_det.g_simple_padding = True
     model = efficient_det.EffNetFPN(compound_coef=0)
+    return model
+
+@registry.BACKBONES.register("efficient-det")
+def build_efficientdet_backbone(cfg):
+    import qd.layers.efficient_det as efficient_det
+    efficient_det.g_simple_padding = True
+    compound = cfg.MODEL.BACKBONE.EFFICIENT_DET_COMPOUND
+    start_from = cfg.MODEL.BACKBONE.EFFICIENT_DET_START_FROM
+    model = efficient_det.EffNetFPN(
+        compound_coef=compound,
+        start_from=start_from)
     return model
 
 def build_backbone(cfg):

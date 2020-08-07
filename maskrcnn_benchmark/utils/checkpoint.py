@@ -47,11 +47,12 @@ class Checkpointer(object):
         save_file = os.path.join(self.save_dir, "{}.pth".format(name))
         self.logger.info("Saving checkpoint to {}".format(save_file))
         torch.save(data, save_file)
-        self.tag_last_checkpoint(save_file)
+        from qd.qd_common import get_mpi_rank
+        if get_mpi_rank() == 0:
+            self.tag_last_checkpoint(save_file)
 
     def load(self, f=None, model_only=False):
         if self.has_checkpoint():
-            # override argument with existing checkpoint
             f = self.get_checkpoint_file()
             model_only = False
         if not f:
@@ -133,9 +134,7 @@ class DetectronCheckpointer(Checkpointer):
     def _load_file(self, f):
         # catalog lookup
         if f.startswith("catalog://"):
-            paths_catalog = import_file(
-                "maskrcnn_benchmark.config.paths_catalog", self.cfg.PATHS_CATALOG, True
-            )
+            from maskrcnn_benchmark.config import paths_catalog
             catalog_f = paths_catalog.ModelCatalog.get(f[len("catalog://") :])
             self.logger.info("{} points to {}".format(f, catalog_f))
             f = catalog_f

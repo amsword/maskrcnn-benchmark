@@ -49,7 +49,8 @@ class ROIBoxHead(torch.nn.Module):
         class_logits, box_regression = self.predictor(x)
 
         if not self.training:
-            result = self.post_processor((class_logits, box_regression), proposals)
+            result = self.post_processor((class_logits, box_regression),
+                    proposals, x)
             return x, result, {}
 
         loss_classifier, loss_box_reg = self.loss_evaluator(

@@ -1,6 +1,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
 import torch
 from torch.nn import functional as F
+import torch.nn as nn
 
 from maskrcnn_benchmark.layers import smooth_l1_loss
 from maskrcnn_benchmark.modeling.box_coder import BoxCoder
@@ -12,7 +13,7 @@ from maskrcnn_benchmark.modeling.balanced_positive_negative_sampler import (
 from maskrcnn_benchmark.modeling.utils import cat
 
 
-class FastRCNNLossComputation(object):
+class FastRCNNLossComputation(nn.Module):
     """
     Computes the loss for Faster R-CNN.
     Also supports FPN
@@ -27,6 +28,7 @@ class FastRCNNLossComputation(object):
         classification_loss_type='CE',
         num_classes=81,
         boundingbox_loss_type='SL1',
+        cfg=None,
     ):
         """
         Arguments:
@@ -34,6 +36,7 @@ class FastRCNNLossComputation(object):
             fg_bg_sampler (BalancedPositiveNegativeSampler)
             box_coder (BoxCoder)
         """
+        super(FastRCNNLossComputation, self).__init__()
         self.proposal_matcher = proposal_matcher
         self.fg_bg_sampler = fg_bg_sampler
         self.box_coder = box_coder
@@ -51,17 +54,15 @@ class FastRCNNLossComputation(object):
         elif self.classification_loss_type == 'MCEB':
             from qd.qd_pytorch import MCEBLoss
             self._classifier_loss = MCEBLoss()
-        else:
-            assert self.classification_loss_type.startswith('tree')
-            raise NotImplementedError('not tested')
-            _, tree_file = list(classification_loss_type.split('$'))[1]
+        elif self.classification_loss_type == 'tree':
+            tree_file = cfg.MODEL.ROI_BOX_HEAD.TREE_0_BKG
             from mtorch.softmaxtree_loss import SoftmaxTreeWithLoss
             self._classifier_loss = SoftmaxTreeWithLoss(
                 tree_file,
                 ignore_label=-1, # this is dummy value since this will not happend
                 loss_weight=1,
                 valid_normalization=True,
-            ).cuda()
+            )
 
         self.num_classes = num_classes
         if boundingbox_loss_type == 'SL1':
@@ -81,7 +82,7 @@ class FastRCNNLossComputation(object):
                     valid_iou_lower=valid_iou_lower)
 
     def create_all_bkg_labels(self, num, device):
-        if self.classification_loss_type in ['CE']:
+        if self.classification_loss_type in ['CE', 'tree']:
             return torch.zeros(num,
                 dtype=torch.float32,
                 device=device)
@@ -97,7 +98,10 @@ class FastRCNNLossComputation(object):
         match_quality_matrix = boxlist_iou(target, proposal)
         matched_idxs = self.proposal_matcher(match_quality_matrix)
         # Fast RCNN only need "labels" field for selecting the targets
-        target = target.copy_with_fields(["labels", 'tightness'])
+        copied_fields = ['labels']
+        if target.has_field('tightness'):
+            copied_fields.append('tightness')
+        target = target.copy_with_fields(copied_fields)
         # get the targets corresponding GT for each proposal
         # NB: need to clamp the indices because we can have a single
         # GT in the image, and matched_idxs can be -2, which goes
@@ -149,13 +153,16 @@ class FastRCNNLossComputation(object):
 
             labels.append(labels_per_image)
             regression_targets.append(regression_targets_per_image)
-            regression_tightness.append(matched_targets.get_field('tightness'))
+            if matched_targets.has_field('tightness'):
+                regression_tightness.append(matched_targets.get_field('tightness'))
             if matched_targets.has_field('matched_iou'):
                 matched_ious.append(matched_targets.get_field('matched_iou'))
 
         result = {'labels': labels,
-                'regression_targets': regression_targets,
-                'regression_tightness': regression_tightness}
+                'regression_targets': regression_targets}
+
+        if len(regression_tightness) > 0:
+            result['regression_tightness'] = regression_tightness
 
         if len(matched_ious) > 0:
             assert len(matched_ious) == len(regression_targets)
@@ -175,19 +182,22 @@ class FastRCNNLossComputation(object):
         """
         prepare_info = self.prepare_targets(proposals, targets)
         labels, regression_targets = prepare_info['labels'], prepare_info['regression_targets']
-        regression_tightness = prepare_info['regression_tightness']
+        if 'regression_tightness' in prepare_info:
+            regression_tightness = prepare_info['regression_tightness']
         sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
 
         proposals = list(proposals)
         # add corresponding label and regression_targets information to the bounding boxes
-        for i, (labels_per_image, regression_targets_per_image, proposals_per_image, rt) in enumerate(zip(
-            labels, regression_targets, proposals, regression_tightness
+        for i, (labels_per_image, regression_targets_per_image, proposals_per_image) in enumerate(zip(
+            labels, regression_targets, proposals
         )):
             proposals_per_image.add_field("labels", labels_per_image)
             proposals_per_image.add_field(
                 "regression_targets", regression_targets_per_image
             )
-            proposals_per_image.add_field('regression_tightness', rt)
+            if 'regression_tightness' in prepare_info:
+                rt = regression_tightness[i]
+                proposals_per_image.add_field('regression_tightness', rt)
             if 'matched_ious' in prepare_info:
                 proposals_per_image.add_field(
                         'matched_ious', prepare_info['matched_ious'][i])
@@ -204,7 +214,7 @@ class FastRCNNLossComputation(object):
         self._proposals = proposals
         return proposals
 
-    def __call__(self, class_logits, box_regression):
+    def forward(self, class_logits, box_regression):
         """
         Computes the loss for Faster R-CNN.
         This requires that the subsample method has been called beforehand.
@@ -231,9 +241,13 @@ class FastRCNNLossComputation(object):
         regression_targets = cat(
             [proposal.get_field("regression_targets") for proposal in proposals], dim=0
         )
-        regression_tightness = cat(
-            [proposal.get_field("regression_tightness") for proposal in proposals], dim=0
-        )
+        if any(p.has_field('regression_tightness') for p in proposals):
+            assert all(p.has_field('regression_tightness') for p in proposals)
+            regression_tightness = cat(
+                [proposal.get_field("regression_tightness") for proposal in proposals], dim=0
+            )
+        else:
+            regression_tightness = None
 
         classification_loss = self._classifier_loss(class_logits, labels)
 
@@ -241,8 +255,11 @@ class FastRCNNLossComputation(object):
             # get indices that correspond to the regression targets for
             # the corresponding ground truth labels, to be used with
             # advanced indexing
-            sampled_pos_inds_subset = torch.nonzero((labels > 0) &
-                    (regression_tightness > 0.9)).squeeze(1)
+            if regression_tightness is not None:
+                sampled_pos_inds_subset = torch.nonzero((labels > 0) &
+                        (regression_tightness > 0.9)).squeeze(1)
+            else:
+                sampled_pos_inds_subset = torch.nonzero(labels > 0).squeeze(1)
             if sampled_pos_inds_subset.numel() == 0:
                 box_loss = torch.tensor(0., device=device)
             else:
@@ -273,7 +290,10 @@ class FastRCNNLossComputation(object):
                 box_loss = box_loss / labels.numel()
         else:
             assert labels.dim() == 2
-            x = torch.nonzero((labels > 0) & (regression_tightness > 0.9)[:, None])
+            if regression_tightness is not None:
+                x = torch.nonzero((labels > 0) & (regression_tightness > 0.9)[:, None])
+            else:
+                x = torch.nonzero(labels > 0)[:, None]
             if x.numel() == 0:
                 box_loss = torch.tensor(0., device=device)
             else:
@@ -310,13 +330,25 @@ class FastRCNNLossComputation(object):
                 box_loss = box_loss / labels.shape[0]
         return classification_loss, box_loss
 
+def create_roi_head_matcher(cfg):
+    if cfg.MODEL.ROI_HEADS.MATCHER_TYPE == 'default':
+        matcher = Matcher(
+            cfg.MODEL.ROI_HEADS.FG_IOU_THRESHOLD,
+            cfg.MODEL.ROI_HEADS.BG_IOU_THRESHOLD,
+            allow_low_quality_matches=False,
+        )
+    elif cfg.MODEL.ROI_HEADS.MATCHER_TYPE == 'single':
+        from maskrcnn_benchmark.modeling.single_matcher import SingleMatcher
+        import logging
+        logging.info('creating single matcher with iou = {}'.format(cfg.MODEL.ROI_HEADS.BG_IOU_THRESHOLD))
+        matcher = SingleMatcher(cfg.MODEL.ROI_HEADS.BG_IOU_THRESHOLD)
+    else:
+        raise NotImplementedError
+
+    return matcher
 
 def make_roi_box_loss_evaluator(cfg):
-    matcher = Matcher(
-        cfg.MODEL.ROI_HEADS.FG_IOU_THRESHOLD,
-        cfg.MODEL.ROI_HEADS.BG_IOU_THRESHOLD,
-        allow_low_quality_matches=False,
-    )
+    matcher = create_roi_head_matcher(cfg)
 
     bbox_reg_weights = cfg.MODEL.ROI_HEADS.BBOX_REG_WEIGHTS
     box_coder = BoxCoder(weights=bbox_reg_weights)
@@ -329,6 +361,7 @@ def make_roi_box_loss_evaluator(cfg):
 
     classification_loss_type = cfg.MODEL.ROI_BOX_HEAD.CLASSIFICATION_LOSS
     num_classes = cfg.MODEL.ROI_BOX_HEAD.NUM_CLASSES
+    cfg = cfg
     loss_evaluator = FastRCNNLossComputation(
         matcher, 
         fg_bg_sampler, 
@@ -337,6 +370,7 @@ def make_roi_box_loss_evaluator(cfg):
         classification_loss_type,
         num_classes,
         boundingbox_loss_type=cfg.MODEL.ROI_BOX_HEAD.BOUNDINGBOX_LOSS_TYPE,
+        cfg=cfg,
     )
 
     return loss_evaluator

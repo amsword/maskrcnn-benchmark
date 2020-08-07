@@ -18,7 +18,8 @@ class MaskTSVDataset(TSVSplitImage):
             multi_hot_label=False,
             cache_policy=None, labelmap=None,
             remove_images_without_annotations=True,
-            bgr2rgb=False):
+            bgr2rgb=False
+            ):
         # we will not use the super class's transform, but uses transforms
         # instead
         super(MaskTSVDataset, self).__init__(data, split, version=version,
@@ -90,18 +91,28 @@ class MaskTSVDataset(TSVSplitImage):
             tightness[i] = anno[i].get('tightness', 1)
         target.add_field('tightness', tightness)
 
-    def get_item_multi_hot_label(self, idx):
-        if self.shuffle:
-            idx = self.shuffle[idx]
+    def get_image_ann(self, idx):
         cv_im, anno, key = super(MaskTSVDataset, self).__getitem__(idx)
-        # we randomly select the max_box results. in the future, we should put it
-        # in the Transform
-        max_box = 300
+
         if self.bgr2rgb:
             import cv2
             cv_im = cv2.cvtColor(cv_im, cv2.COLOR_BGR2RGB)
 
         img = transforms.ToPILImage()(cv_im)
+        if isinstance(anno, int):
+            # this is image-level labels
+            w, h = img.size
+            anno = [{'class': str(anno),
+                'rect': [0, 0, w, h]}]
+
+        return img, anno
+
+    def get_item_multi_hot_label(self, idx):
+        iteration, idx, max_iter = idx['iteration'], idx['idx'], idx['max_iter']
+        if self.shuffle:
+            idx = self.shuffle[idx]
+
+        img, anno = self.get_image_ann(idx)
 
         # coco data has this kind of property
         anno = [obj for obj in anno if obj.get("iscrowd", 0) == 0]
@@ -110,12 +121,17 @@ class MaskTSVDataset(TSVSplitImage):
 
         from qd.qd_common import merge_class_names_by_location_id
         anno = merge_class_names_by_location_id(anno)
+
+        # we randomly select the max_box results. in the future, we should put it
+        # in the Transform
+        max_box = 800
         # it will occupy 10G if it is 300 for one image.
         if len(anno) > max_box:
+            logging.info('maximum box exceeds {} and we will truncate'.format(max_box))
             import random
             random.shuffle(anno)
             anno = anno[:max_box]
-
+        anno = [o for o in anno if 'rect' in o]
         boxes = [obj["rect"] for obj in anno]
         boxes = torch.as_tensor(boxes).reshape(-1, 4)  # guard against no boxes
         target = BoxList(boxes, img.size, mode="xyxy")
@@ -137,30 +153,35 @@ class MaskTSVDataset(TSVSplitImage):
         target = target.clip_to_image(remove_empty=True)
 
         if self.transforms is not None:
-            img, target = self.transforms(img, target)
+            trans_input = {'image': img,
+                           'rects': target,
+                           'iteration': iteration,
+                           'max_iter': max_iter,
+                           'dataset': self,
+                           }
+            trans_out = self.transforms(trans_input)
+            img, target = trans_out['image'], trans_out['rects']
 
         return img, target, idx
 
     def get_item_for_softmax(self, idx):
+        iteration, idx, max_iter = idx['iteration'], idx['idx'], idx['max_iter']
         if self.shuffle:
             idx = self.shuffle[idx]
-        cv_im, anno, key = super(MaskTSVDataset, self).__getitem__(idx)
+        img, anno = self.get_image_ann(idx)
         # we randomly select the max_box results. in the future, we should put it
         # in the Transform
-        max_box = 300
+        max_box = 800
         # it will occupy 10G if it is 300 for one image.
         if len(anno) > max_box:
+            logging.info('maximum box exceeds {} and we will truncate'.format(max_box))
             import random
             random.shuffle(anno)
             anno = anno[:max_box]
+        anno = [o for o in anno if 'rect' in o]
         if any('location_id' in a for a in anno):
             # in this case, all locations should be unique for now.
             assert len(set(a['location_id'] for a in anno)) == len(anno)
-
-        if self.bgr2rgb:
-            import cv2
-            cv_im = cv2.cvtColor(cv_im, cv2.COLOR_BGR2RGB)
-        img = transforms.ToPILImage()(cv_im)
 
         # coco data has this kind of property
         anno = [obj for obj in anno if obj.get("iscrowd", 0) == 0]
@@ -187,7 +208,14 @@ class MaskTSVDataset(TSVSplitImage):
         target = target.clip_to_image(remove_empty=True)
 
         if self.transforms is not None:
-            img, target = self.transforms(img, target)
+            trans_input = {'image': img,
+                           'rects': target,
+                           'iteration': iteration,
+                           'max_iter': max_iter,
+                           'dataset': self,
+                           }
+            trans_out = self.transforms(trans_input)
+            img, target = trans_out['image'], trans_out['rects']
 
         return img, target, idx
 

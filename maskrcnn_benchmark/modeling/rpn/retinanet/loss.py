@@ -15,8 +15,18 @@ from maskrcnn_benchmark.modeling.utils import cat
 from maskrcnn_benchmark.structures.boxlist_ops import boxlist_iou
 from maskrcnn_benchmark.structures.boxlist_ops import cat_boxlist
 from maskrcnn_benchmark.modeling.rpn.loss import RPNLossComputation
+from maskrcnn_benchmark.modeling.rpn.loss import RPNLossComputationModule
 
-class RetinaNetLossComputation(RPNLossComputation):
+
+class SmoothL1Loss(torch.nn.Module):
+    def forward(self, *args, **kwargs):
+        return smooth_l1_loss(*args, **kwargs)
+
+class ConcatBoxPredictionLayers(torch.nn.Module):
+    def forward(self, *args, **kwargs):
+        return concat_box_prediction_layers(*args, **kwargs)
+
+class RetinaNetLossComputation(RPNLossComputationModule):
     """
     This class computes the RetinaNet loss.
     """
@@ -31,6 +41,10 @@ class RetinaNetLossComputation(RPNLossComputation):
             proposal_matcher (Matcher)
             box_coder (BoxCoder)
         """
+        super().__init__(proposal_matcher=proposal_matcher,
+                         fg_bg_sampler=None,
+                         box_coder=box_coder,
+                         generate_labels_func=generate_labels_func)
         self.proposal_matcher = proposal_matcher
         self.box_coder = box_coder
         self.box_cls_loss_func = sigmoid_focal_loss
@@ -40,8 +54,11 @@ class RetinaNetLossComputation(RPNLossComputation):
         self.discard_cases = ['between_thresholds']
         self.regress_norm = regress_norm
         self.num_valid_iter = 0
+        self.smooth_l1_loss = SmoothL1Loss()
+        self.iter = 0
+        self.concat = ConcatBoxPredictionLayers()
 
-    def __call__(self, anchors, box_cls, box_regression, targets):
+    def forward(self, anchors, box_cls, box_regression, targets):
         """
         Arguments:
             anchors (list[BoxList])
@@ -53,18 +70,35 @@ class RetinaNetLossComputation(RPNLossComputation):
             retinanet_cls_loss (Tensor)
             retinanet_regression_loss (Tensor
         """
+        debug = (self.iter % 100) == 0
+        debug_info = []
+        self.iter += 1
+        import time
+        start = time.time()
         anchors = [cat_boxlist(anchors_per_image) for anchors_per_image in anchors]
+        if debug:
+            debug_info.append('name = cat_boxlist, global_avg = {}'.format(
+                time.time() - start))
+
         labels, regression_targets = self.prepare_targets(anchors, targets)
+        if debug:
+            debug_info.append('name = to_prepare, global_avg = {}'.format(
+                time.time() - start
+            ))
 
         N = len(labels)
         box_cls, box_regression = \
-                concat_box_prediction_layers(box_cls, box_regression)
+                self.concat(box_cls, box_regression)
+        if debug:
+            debug_info.append('name = to_concat, global_avg = {}'.format(
+                time.time() - start
+            ))
 
         labels = torch.cat(labels, dim=0)
         regression_targets = torch.cat(regression_targets, dim=0)
         pos_inds = torch.nonzero(labels > 0).squeeze(1)
 
-        retinanet_regression_loss = smooth_l1_loss(
+        retinanet_regression_loss = self.smooth_l1_loss(
             box_regression[pos_inds],
             regression_targets[pos_inds],
             beta=self.bbox_reg_beta,
@@ -78,6 +112,13 @@ class RetinaNetLossComputation(RPNLossComputation):
             labels
         ) / (pos_inds.numel() + N)
 
+        if debug:
+            debug_info.append('name = to_end, global_avg = {}'.format(
+                time.time() - start
+            ))
+            import logging
+            logging.info('\n'.join(debug_info))
+
         return retinanet_cls_loss, retinanet_regression_loss
 
 
@@ -87,7 +128,8 @@ def generate_retinanet_labels(matched_targets):
 
 
 def make_retinanet_loss_evaluator(cfg, box_coder):
-    matcher = Matcher(
+    from maskrcnn_benchmark.modeling.matcher import MatcherModule
+    matcher = MatcherModule(
         cfg.MODEL.RETINANET.FG_IOU_THRESHOLD,
         cfg.MODEL.RETINANET.BG_IOU_THRESHOLD,
         allow_low_quality_matches=True,

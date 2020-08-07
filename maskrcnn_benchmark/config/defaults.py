@@ -54,11 +54,19 @@ _C.INPUT.PIXEL_STD = [1., 1., 1.]
 # Convert image to BGR format (for Caffe2 models), in range 0-255
 _C.INPUT.TO_BGR255 = True
 
+# this should be True always, we will remove the code path with False
+#_C.INPUT.USE_DICT_DATA = True
+_C.INPUT.MIN_SIZE_ON_ITER = False
+_C.INPUT.TREAT_MIN_AS_MAX = False
+_C.INPUT.TRAIN_RESIZER = '' # a yaml formated string
+
+
 # Image ColorJitter
 _C.INPUT.BRIGHTNESS = 0.0
 _C.INPUT.CONTRAST = 0.0
 _C.INPUT.SATURATION = 0.0
 _C.INPUT.HUE = 0.0
+_C.INPUT.COLORJITTER_ADAPTIVE = ''
 
 _C.INPUT.USE_FIXED_SIZE_AUGMENTATION = False
 _C.INPUT.FIXED_SIZE_AUG = CN()
@@ -102,6 +110,9 @@ _C.MODEL.BACKBONE = CN()
 # (e.g., 'FPN.add_fpn_ResNet101_conv5_body' to specify a ResNet-101-FPN
 # backbone)
 _C.MODEL.BACKBONE.CONV_BODY = "R-50-C4"
+_C.MODEL.BACKBONE.EFFICIENT_DET_START_FROM = 3
+_C.MODEL.BACKBONE.EFFICIENT_DET_COMPOUND = 0
+_C.MODEL.BACKBONE.CONV_BODY_PARAM = ""
 
 # Add StopGrad at a specified stage so the bottom layers are frozen
 _C.MODEL.BACKBONE.FREEZE_CONV_BODY_AT = 2
@@ -156,6 +167,7 @@ _C.MODEL.RPN.FG_IOU_THRESHOLD = 0.7
 # (anchor, gt box) pair to be a negative examples (IoU < BG_IOU_THRESHOLD
 # ==> negative RPN example)
 _C.MODEL.RPN.BG_IOU_THRESHOLD = 0.3
+_C.MODEL.RPN.MATCHER_TYPE = 'default' # default or single
 # Total number of RPN examples per image
 _C.MODEL.RPN.BATCH_SIZE_PER_IMAGE = 256
 # Target fraction of foreground (positive) examples per RPN minibatch
@@ -206,6 +218,7 @@ _C.MODEL.ROI_HEADS.FG_IOU_THRESHOLD = 0.5
 # Overlap threshold for an RoI to be considered background
 # (class = 0 if overlap in [0, BG_IOU_THRESHOLD))
 _C.MODEL.ROI_HEADS.BG_IOU_THRESHOLD = 0.5
+_C.MODEL.ROI_HEADS.MATCHER_TYPE = 'default' # default vs single
 # Default weights on (dx, dy, dw, dh) for normalizing bbox regression targets
 # These are empirically chosen to approximately lead to unit variance targets
 _C.MODEL.ROI_HEADS.BBOX_REG_WEIGHTS = (10., 10., 5., 5.)
@@ -260,8 +273,9 @@ _C.MODEL.ROI_BOX_HEAD.DILATION = 1
 _C.MODEL.ROI_BOX_HEAD.CONV_HEAD_DIM = 256
 _C.MODEL.ROI_BOX_HEAD.NUM_STACKED_CONVS = 4
 
-_C.MODEL.ROI_BOX_HEAD.CLASSIFICATION_ACTIVATE = 'softmax' # or sigmoid, for testing
+_C.MODEL.ROI_BOX_HEAD.CLASSIFICATION_ACTIVATE = 'softmax' # or sigmoid, for testing, tree
 _C.MODEL.ROI_BOX_HEAD.CLASSIFICATION_LOSS = 'CE' # or BCE . for training
+_C.MODEL.ROI_BOX_HEAD.TREE_0_BKG = ''
 _C.MODEL.ROI_BOX_HEAD.BOUNDINGBOX_LOSS_TYPE = 'SL1' # SL1 or WSL1
 
 _C.MODEL.ROI_MASK_HEAD = CN()
@@ -341,6 +355,8 @@ _C.MODEL.RESNETS.DEFORMABLE_GROUPS = 1
 
 _C.MODEL.RESNETS.USE_SE = False
 
+_C.MODEL.RESNETS.LAYERS = (3, 4, 6, 3) # for ResNet-34
+_C.MODEL.RESNETS.IN_CHANNELS = (64, 128, 256, 512)
 # ---------------------------------------------------------------------------- #
 # RetinaNet Options (Follow the Detectron version)
 # ---------------------------------------------------------------------------- #
@@ -499,6 +515,8 @@ _C.TEST.DETECTIONS_PER_IMG = 100
 # min size of box during inference, only keep boxes with both sides >= min_size
 _C.TEST.BOX_MIN_SIZE = 0
 
+_C.TEST.OUTPUT_FEATURE = False
+
 # ---------------------------------------------------------------------------- #
 # Misc options
 # ---------------------------------------------------------------------------- #
@@ -515,3 +533,5 @@ _C.DTYPE = "float32"
 
 # Enable verbosity in apex.amp
 _C.AMP_VERBOSE = False
+
+_default_cfg = _C.clone()

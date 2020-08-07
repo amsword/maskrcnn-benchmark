@@ -39,8 +39,6 @@ sigmoid_focal_loss_cuda = _SigmoidFocalLoss.apply
 
 def sigmoid_focal_loss_cpu(logits, targets, gamma, alpha):
     num_classes = logits.shape[1]
-    gamma = gamma[0]
-    alpha = alpha[0]
     dtype = targets.dtype
     device = targets.device
     class_range = torch.arange(1, num_classes+1, dtype=dtype, device=device).unsqueeze(0)
@@ -57,15 +55,26 @@ class SigmoidFocalLoss(nn.Module):
         super(SigmoidFocalLoss, self).__init__()
         self.gamma = gamma
         self.alpha = alpha
+        self.iter = 0
 
     def forward(self, logits, targets):
-        device = logits.device
         if logits.is_cuda:
             loss_func = sigmoid_focal_loss_cuda
         else:
             loss_func = sigmoid_focal_loss_cpu
-
+        debug = (self.iter % 100) == 0
         loss = loss_func(logits, targets, self.gamma, self.alpha)
+
+        if debug:
+            debug_logits = logits.detach()
+            idx = (targets > 0).nonzero()
+            label = targets[idx] - 1
+            pos = debug_logits[idx, label.long()].mean()
+            idx = (targets == 0).nonzero()
+            neg = debug_logits[idx, :].mean()
+            import logging
+            logging.info('pos = {}; neg = {}'.format(pos, neg))
+        self.iter += 1
         return loss.sum()
 
     def __repr__(self):

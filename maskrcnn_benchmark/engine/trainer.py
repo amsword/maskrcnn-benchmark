@@ -137,12 +137,21 @@ def do_train(
     from qd.qd_common import is_hvd_initialized
     use_hvd = is_hvd_initialized()
     visualize_input = False
+    fix_input = False
 
     for iteration, (images, targets, _) in enumerate(data_loader, start_iter):
         if hasattr(images, 'image_sizes') and len(images.image_sizes) == 0:
             logging.error('this should never happen since different workers '
                     'will have different numbers of iterations.')
             continue
+
+        if fix_input:
+            logging.info('fix input')
+            from qd.qd_common import run_if_not_memory_cached
+            def get_x(x):
+                return x
+            images = run_if_not_memory_cached(get_x, images, __key='images')
+            targets = run_if_not_memory_cached(get_x, targets, __key='targets')
 
         if visualize_input:
             from qd.qd_pytorch import visualize_maskrcnn_input
@@ -181,6 +190,7 @@ def do_train(
 
         if not no_update:
             optimizer.step()
+
 
         batch_time = time.time() - end
         end = time.time()
@@ -222,18 +232,19 @@ def do_train(
             # with blobfuse, saving could fail with unknown reason. Instead of
             # saving and crashing, we do a best-effort manner.
             try_save_intermediate_snapshot(checkpointer, iteration, arguments)
-        if iteration >= max_iter:
-            checkpointer.save("model_final", **arguments)
-            if get_rank() > 0:
-                old_value = checkpointer.save_to_disk
-                checkpointer.save_to_disk = True
-                checkpointer.save("model_final_{}".format(get_rank()), **arguments)
-                checkpointer.save_to_disk = old_value
+
+    checkpointer.save("model_final", **arguments)
+    if get_rank() > 0:
+        old_value = checkpointer.save_to_disk
+        checkpointer.save_to_disk = True
+        checkpointer.save("model_final_{}".format(get_rank()), **arguments)
+        checkpointer.save_to_disk = old_value
 
     total_training_time = time.time() - start_training_time
     total_time_str = str(datetime.timedelta(seconds=total_training_time))
     logger.info(
         "Total training time: {} ({:.4f} s / it)".format(
-            total_time_str, total_training_time / (max_iter)
+            total_time_str, total_training_time / (1 if max_iter == 0 else
+                                                   max_iter)
         )
     )

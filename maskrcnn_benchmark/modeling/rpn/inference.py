@@ -114,24 +114,29 @@ class RPNPostProcessor(torch.nn.Module):
         concat_anchors = torch.cat([a.bbox for a in anchors], dim=0)
         concat_anchors = concat_anchors.reshape(N, -1, 4)[batch_idx, topk_idx]
 
-        proposals = self.box_coder.decode(
-            box_regression.view(-1, 4), concat_anchors.view(-1, 4)
-        )
+        #decode2cxywh = self.nms_func.input_mode == 'cxywh'
+        decode2cxywh = False
+        if decode2cxywh:
+            proposals = self.box_coder.decode2cxywh(
+                box_regression.view(-1, 4), concat_anchors.view(-1, 4)
+            )
+            mode = 'cxywh'
+        else:
+            proposals = self.box_coder.decode(
+                box_regression.view(-1, 4), concat_anchors.view(-1, 4)
+            )
+            mode = 'xyxy'
 
         proposals = proposals.view(N, -1, 4)
 
         result = []
         for proposal, score, im_shape in zip(proposals, objectness, image_shapes):
-            boxlist = BoxList(proposal, im_shape, mode="xyxy")
+            boxlist = BoxList(proposal, im_shape, mode=mode)
             boxlist.add_field("objectness", score)
             boxlist = boxlist.clip_to_image(remove_empty=False)
             boxlist = remove_small_boxes(boxlist, self.min_size)
-            boxlist = boxlist_nms(
-                boxlist,
-                self.nms_thresh,
-                max_proposals=self.post_nms_top_n,
-                score_field="objectness",
-            )
+            boxlist = self.nms_func(boxlist)
+            boxlist = boxlist.convert('xyxy')
             result.append(boxlist)
         return result
 
@@ -207,6 +212,7 @@ def make_rpn_postprocessor(config, rpn_box_coder, is_train):
     fpn_post_nms_per_batch = config.MODEL.RPN.FPN_POST_NMS_PER_BATCH
     nms_thresh = config.MODEL.RPN.NMS_THRESH
     min_size = config.MODEL.RPN.MIN_SIZE
+    nms_policy = config.MODEL.RPN.NMS_POLICY
     box_selector = RPNPostProcessor(
         pre_nms_top_n=pre_nms_top_n,
         post_nms_top_n=post_nms_top_n,
@@ -215,5 +221,6 @@ def make_rpn_postprocessor(config, rpn_box_coder, is_train):
         box_coder=rpn_box_coder,
         fpn_post_nms_top_n=fpn_post_nms_top_n,
         fpn_post_nms_per_batch=fpn_post_nms_per_batch,
+        nms_policy=nms_policy,
     )
     return box_selector

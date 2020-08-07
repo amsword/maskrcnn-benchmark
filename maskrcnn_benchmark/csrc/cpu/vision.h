@@ -15,6 +15,11 @@ at::Tensor nms_cpu(const at::Tensor& dets,
                    const at::Tensor& scores,
                    const float threshold);
 
+at::Tensor nms_cpu_max(const at::Tensor& dets,
+                   const at::Tensor& scores,
+                   const float threshold,
+                   int max_box);
+
 at::Tensor hnms_cpu(const at::Tensor& dets,
                const at::Tensor& scores,
                float w0,
